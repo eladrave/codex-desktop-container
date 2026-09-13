@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-and-build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install validators
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes apparmor-utils shellcheck
+      - name: Validate source and configuration
+        run: ./scripts/validate.sh
+      - name: Build the pinned image
+        run: |
+          docker build \
+            --tag codex-desktop:ci \
+            .
+      - name: Verify installed package versions
+        run: |
+          docker run --rm --entrypoint /bin/bash codex-desktop:ci -c '
+            set -Eeuo pipefail
+            test "$(dpkg-query -W chatgpt | cut -f2)" = "${CODEX_DESKTOP_CHATGPT_VERSION}"
+            test "$(dpkg-query -W chrome-remote-desktop | cut -f2)" = "${CODEX_DESKTOP_CRD_VERSION}"
+            test "$(dpkg-query -W google-chrome-stable | cut -f2)" = "${CODEX_DESKTOP_CHROME_VERSION}"
+            test -x /usr/bin/chatgpt
+            test -x /usr/local/bin/tailscale
+            test -x /opt/google/chrome-remote-desktop/start-host
+          '

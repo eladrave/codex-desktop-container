@@ -1,0 +1,23 @@
+[Unit]
+Description=Persistent Codex desktop with Chrome Remote Desktop and Tailscale SSH
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/opt/services/codex-desktop
+EnvironmentFile=/etc/codex-desktop/deploy.env
+ExecStartPre=/usr/bin/install -d -o 10001 -g 10001 -m 0700 /var/lib/codex-desktop/home
+ExecStartPre=/usr/bin/install -d -o 0 -g 0 -m 0700 /var/lib/codex-desktop/tailscale
+ExecStartPre=/usr/bin/install -d -o 0 -g 0 -m 0700 /var/lib/codex-desktop/machine
+ExecStartPre=/usr/sbin/apparmor_parser --replace /opt/services/codex-desktop/apparmor-chatgpt
+ExecStart=/usr/bin/docker compose --project-name codex-desktop --env-file /etc/codex-desktop/deploy.env -f /opt/services/codex-desktop/compose.yaml up -d --no-build --remove-orphans
+ExecStartPost=/bin/sh -c 'for attempt in $(seq 1 60); do state=$(/usr/bin/docker inspect --format={{.State.Health.Status}} codex-desktop-desktop-1 2>/dev/null || true); test "$state" = healthy && exit 0; sleep 2; done; exit 1'
+ExecStop=/usr/bin/docker compose --project-name codex-desktop --env-file /etc/codex-desktop/deploy.env -f /opt/services/codex-desktop/compose.yaml stop
+TimeoutStartSec=180
+TimeoutStopSec=60
+
+[Install]
+WantedBy=multi-user.target

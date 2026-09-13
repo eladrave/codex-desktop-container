@@ -1,0 +1,9 @@
+abi <abi/4.0>,
+include <tunables/global>
+
+# Match the official profile shipped by OpenAI's Linux package. The container
+# starts unconfined so this executable-specific profile can attach and grant
+# only the user-namespace permission required by Chromium's sandbox.
+profile codex-desktop-chatgpt "/usr/lib/chatgpt/ChatGPT" flags=(unconfined) {
+  userns,
+}

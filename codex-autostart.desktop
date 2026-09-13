@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Codex
+Comment=Open the Codex desktop experience
+Exec=/usr/bin/chatgpt
+TryExec=/usr/bin/chatgpt
+Terminal=false
+StartupNotify=true
+X-GNOME-Autostart-enabled=true

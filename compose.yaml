@@ -1,0 +1,70 @@
+name: codex-desktop
+
+services:
+  desktop:
+    image: ${IMAGE_REF:?Set IMAGE_REF in /etc/codex-desktop/deploy.env}
+    hostname: ${CONTAINER_HOSTNAME:-codex-desktop}
+    init: false
+    environment:
+      HOME: /home/codex
+      USER: codex
+      LOGNAME: codex
+      SHELL: /bin/bash
+      CODEX_HOME: /home/codex/.codex
+      TZ: ${TZ:-Etc/UTC}
+      TS_STATE_DIR: /var/lib/tailscale
+      TS_HOSTNAME: ${TAILSCALE_HOSTNAME:-codex-desktop}
+      CHROME_REMOTE_DESKTOP_DEFAULT_DESKTOP_SIZES: ${DESKTOP_SIZES:-1920x1080,2560x1440}
+      CHROME_REMOTE_DESKTOP_USE_XVFB: "1"
+      LIBGL_ALWAYS_SOFTWARE: "1"
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - KILL
+      - NET_ADMIN
+      - NET_RAW
+      - SETGID
+      - SETUID
+    security_opt:
+      # Ubuntu 24.04 AppArmor and Docker's default seccomp profile restrict the
+      # unprivileged user namespaces required by the Codex Electron sandbox.
+      # Keep Chromium's sandbox enabled and retain Docker namespaces,
+      # no-new-privileges, the capability allowlist, and no published ports.
+      - apparmor=unconfined
+      - seccomp=unconfined
+      - no-new-privileges:true
+    volumes:
+      - type: bind
+        source: /var/lib/codex-desktop/home
+        target: /home/codex
+      - type: bind
+        source: /var/lib/codex-desktop/tailscale
+        target: /var/lib/tailscale
+      - type: bind
+        source: /var/lib/codex-desktop/machine
+        target: /var/lib/codex-desktop-persistent
+    tmpfs:
+      - /run:rw,nosuid,nodev,mode=0755
+      - /tmp:rw,nosuid,nodev,mode=1777
+    shm_size: 1gb
+    healthcheck:
+      test: ["CMD", "/usr/local/sbin/codex-desktop-healthcheck"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+    stop_grace_period: 45s
+    mem_limit: 3g
+    mem_reservation: 512m
+    cpus: 2.0
+    pids_limit: 2048
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"

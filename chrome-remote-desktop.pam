@@ -1,0 +1,17 @@
+# Chrome Remote Desktop authenticates the remote user with the registered
+# Google identity and host PIN before running PAM account authorization.
+@include common-auth
+
+# The dedicated local codex account intentionally has no usable Unix password.
+# Permit its CRD-only account check without invoking pam_unix's setuid helper,
+# which is blocked by the container-wide no-new-privileges boundary.
+account sufficient pam_succeed_if.so quiet user = codex
+@include common-account
+
+@include common-password
+session [success=ok ignore=ignore module_unknown=ignore default=bad] pam_selinux.so close
+session required pam_limits.so
+@include common-session
+session [success=ok ignore=ignore module_unknown=ignore default=bad] pam_selinux.so open
+session required pam_env.so readenv=1
+session required pam_env.so readenv=1 user_readenv=1 envfile=/etc/default/locale

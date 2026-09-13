@@ -1,0 +1,10 @@
+.git
+.github
+deploy.env
+.env
+.env.*
+*.key
+*.pem
+known_hosts
+tailscaled.state
+host#*.json
