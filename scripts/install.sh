@@ -243,10 +243,12 @@ existing_install=0
 [[ ! -d "${service_dir}" ]] || had_service_dir=1
 [[ ! -f "${config_file}" ]] || had_config_file=1
 [[ ! -f "${unit_file}" ]] || had_unit_file=1
-systemctl is-enabled --quiet codex-desktop.service >/dev/null 2>&1 && \
-  unit_was_enabled=1 || true
-systemctl is-active --quiet codex-desktop.service >/dev/null 2>&1 && \
-  unit_was_active=1 || true
+if systemctl is-enabled --quiet codex-desktop.service >/dev/null 2>&1; then
+  unit_was_enabled=1
+fi
+if systemctl is-active --quiet codex-desktop.service >/dev/null 2>&1; then
+  unit_was_active=1
+fi
 container_running=0
 if docker inspect "${container_name}" --format '{{.State.Running}}' \
   2>/dev/null | grep -Fqx true; then

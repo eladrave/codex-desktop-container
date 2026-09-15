@@ -26,7 +26,7 @@ done
 
 child_pid=
 # Invoked indirectly by the signal trap below.
-# shellcheck disable=SC2329
+# shellcheck disable=SC2317,SC2329
 terminate() {
   trap - TERM INT HUP
   if [[ -n "${child_pid}" ]] && kill -0 "${child_pid}" 2>/dev/null; then
