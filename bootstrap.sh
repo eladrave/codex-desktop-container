@@ -71,7 +71,9 @@ if [ "${1:-}" = --help ] || [ "${1:-}" = -h ]; then
   exit 0
 fi
 [ "$#" -eq 0 ] || { usage; exit 64; }
-[ -r /dev/tty ] && [ -w /dev/tty ] || fail 'Run this command from an interactive terminal.'
+if [ ! -r /dev/tty ] || [ ! -w /dev/tty ]; then
+  fail 'Run this command from an interactive terminal.'
+fi
 
 host_os=$(uname -s)
 host_arch=$(uname -m)
@@ -105,8 +107,9 @@ prepare_linux() {
   [ -r /etc/os-release ] || fail 'Unable to identify the Linux distribution.'
   # shellcheck disable=SC1091
   . /etc/os-release
-  [ "${ID:-}" = ubuntu ] && [ "${VERSION_ID:-}" = 24.04 ] || \
+  if [ "${ID:-}" != ubuntu ] || [ "${VERSION_ID:-}" != 24.04 ]; then
     fail "The automated Linux installer supports Ubuntu 24.04 AMD64; found ${ID:-unknown} ${VERSION_ID:-unknown}."
+  fi
   command -v sudo >/dev/null 2>&1 || fail 'sudo is required.'
 
   missing_prerequisites=0
