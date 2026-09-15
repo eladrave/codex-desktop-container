@@ -46,5 +46,10 @@ Apple silicon backups under `~/.local/share/codex-desktop/backups` contain the
 same credential-bearing state exported from named Docker volumes. Keep that
 directory private and apply the same encryption and retention rules.
 
+The Apple silicon Compose override sets `GODEBUG=cpu.avx2=off` to avoid a
+Go/Rosetta cryptographic implementation bug. Tailscale still performs its
+normal encrypted Noise and WireGuard protocols; only the faulty emulated AVX2
+optimization is disabled.
+
 Report a suspected vulnerability privately through GitHub's security advisory
 interface for this repository. Do not open a public issue containing secrets.

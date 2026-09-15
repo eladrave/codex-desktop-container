@@ -18,6 +18,7 @@ if grep -Fq 'scripts/install-macos.sh"' bootstrap.sh; then
 fi
 grep -Fq 'exec bash "${repo_dir}/scripts/install-macos.sh" "$@"' scripts/install.sh
 grep -Fq 'platform: linux/amd64' compose.macos.yaml
+grep -Fq 'GODEBUG: cpu.avx2=off' compose.macos.yaml
 grep -Fq 'codex-desktop-home' scripts/verify-macos.sh
 grep -Fq -- '--tun=userspace-networking' supervisord.conf
 

@@ -50,6 +50,11 @@ adds a user launch agent that starts Docker Desktop and this Compose project at
 login. Scheduled tasks still require the Mac to remain powered on, awake, and
 logged in; macOS sleep suspends Docker Desktop and the container.
 
+The macOS Compose override sets `GODEBUG=cpu.avx2=off`. This disables a broken
+[Go/Rosetta AVX2 ChaCha20-Poly1305 path](https://github.com/golang/go/issues/79205)
+that otherwise prevents Tailscale from producing its browser-login URL. It does
+not disable Tailscale encryption or change native AMD64 Linux behavior.
+
 ## What persists
 
 The Compose configuration keeps the state that must survive container

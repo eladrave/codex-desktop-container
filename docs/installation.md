@@ -294,6 +294,11 @@ installer verifies the Docker memory allocation and performs an AMD64 image
 smoke check, but the operator must still complete real CRD, Codex, Chrome,
 noVNC, restart-persistence, and scheduled-task acceptance.
 
+The macOS override disables only Go's emulated AVX2 path with
+`GODEBUG=cpu.avx2=off`. [Go issue 79205](https://github.com/golang/go/issues/79205)
+documents invalid AVX2 ChaCha20-Poly1305 results under Rosetta 2; without this
+setting, Tailscale enrollment can remain at `NeedsLogin` without printing a URL.
+
 The installed launch agent starts Docker Desktop and the Compose project when
 the user logs in. It cannot run while the Mac is powered off, logged out, or
 asleep. Configure macOS power settings appropriate for the intended scheduled
