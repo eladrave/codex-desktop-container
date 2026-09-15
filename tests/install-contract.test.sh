@@ -13,6 +13,9 @@ grep -Fq -- '--auth-key=file:/run/secrets/tailscale-auth-key' scripts/install-ma
 grep -Fq -- "tailscale up --hostname=\"\${tailscale_hostname}\" --ssh" scripts/install.sh
 grep -Fq 'prompt_secret tailscale_auth_key' scripts/install.sh
 grep -Fq 'prompt_secret tailscale_auth_key' scripts/install-macos.sh
+grep -Fq 'enroll_tailscale_in_browser' scripts/install-macos.sh
+grep -Fq '.AuthURL // \"\"' scripts/install-macos.sh
+grep -Fq 'Open this Tailscale login URL in a trusted browser:' scripts/install-macos.sh
 grep -Fq 'Do not paste it into chat.' scripts/install.sh
 grep -Fq "rm -f -- \"\${secret_path}\"" scripts/install.sh
 grep -Fq "rm -f -- \"\${secret_path}\"" scripts/install-macos.sh

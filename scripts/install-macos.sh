@@ -20,6 +20,7 @@ chrome_arm64_url='https://dl.google.com/linux/chrome/deb/pool/main/g/google-chro
 chrome_arm64_sha256='6ccab79a7afe1d174c89e28cf0d5a265e6e8855ff3b45c6a2151a65d7ddae9e8'
 secret_path=/run/secrets/tailscale-auth-key
 temporary_secret_installed=0
+tailscale_up_pid=
 backup_dir=
 previous_source_dir=
 source_swapped=0
@@ -74,9 +75,52 @@ cleanup_tailscale_secret() {
   fi
 }
 
+cleanup_tailscale_up() {
+  if [[ -n "${tailscale_up_pid}" ]] && kill -0 "${tailscale_up_pid}" 2>/dev/null; then
+    kill -TERM "${tailscale_up_pid}" 2>/dev/null || true
+    wait "${tailscale_up_pid}" 2>/dev/null || true
+  fi
+  tailscale_up_pid=
+}
+
+enroll_tailscale_in_browser() {
+  local attempt auth_url='' backend_state='' current_auth_url='' status_line=''
+
+  docker exec "${container_name}" tailscale up \
+    --hostname="${tailscale_hostname}" --ssh >/dev/null 2>&1 &
+  tailscale_up_pid=$!
+
+  for ((attempt = 1; attempt <= 900; attempt++)); do
+    status_line="$(docker exec "${container_name}" sh -c \
+      "tailscale status --json 2>/dev/null | jq -r '[.BackendState // \"\", .AuthURL // \"\"] | @tsv'" || true)"
+    IFS=$'\t' read -r backend_state current_auth_url <<<"${status_line}"
+
+    if [[ -n "${current_auth_url}" && "${current_auth_url}" != "${auth_url}" ]]; then
+      auth_url="${current_auth_url}"
+      printf '\nOpen this Tailscale login URL in a trusted browser:\n%s\n\n' \
+        "${auth_url}" >/dev/tty
+      printf 'Waiting for browser approval...\n' >/dev/tty
+    fi
+    if [[ "${backend_state}" == Running ]]; then
+      cleanup_tailscale_up
+      return 0
+    fi
+    if ! kill -0 "${tailscale_up_pid}" 2>/dev/null && [[ -z "${auth_url}" ]]; then
+      wait "${tailscale_up_pid}" 2>/dev/null || true
+      tailscale_up_pid=
+      die 'Tailscale stopped before producing a browser login URL.'
+    fi
+    sleep 1
+  done
+
+  cleanup_tailscale_up
+  die 'Timed out waiting for Tailscale browser approval.'
+}
+
 on_exit() {
   local status=$?
   trap - EXIT
+  cleanup_tailscale_up
   cleanup_tailscale_secret || \
     printf 'Warning: temporary Tailscale auth-key removal could not be verified.\n' >&2
 
@@ -526,9 +570,9 @@ else
     cleanup_tailscale_secret || die 'Temporary Tailscale auth-key removal could not be verified.'
   else
     printf '%s\n' \
-      'Tailscale will print a login URL. Open it in a trusted browser or private window,' \
-      'select the intended account/tailnet, approve the device, and return here.' >/dev/tty
-    docker exec -i "${container_name}" tailscale up --hostname="${tailscale_hostname}" --ssh
+      'The installer will print a login URL below. Open it in a trusted browser or private window,' \
+      'select the intended account/tailnet, and approve the device.' >/dev/tty
+    enroll_tailscale_in_browser
   fi
 fi
 

@@ -141,10 +141,11 @@ docker exec -i codex-desktop-desktop-1 \
   tailscale up --hostname=codex-desktop --ssh
 ```
 
-Tailscale prints a login URL. Open that URL in a trusted browser, sign in with
-the intended account, select the correct tailnet, and approve the device. When
-multiple accounts share the browser, use a private browser window so an old
-session does not silently select the wrong account.
+The installer polls Tailscale's structured daemon status and prints the login
+URL directly to the trusted terminal. Open that URL in a trusted browser, sign
+in with the intended account, select the correct tailnet, and approve the
+device. When multiple accounts share the browser, use a private browser window
+so an old session does not silently select the wrong account.
 
 The command returns after approval. The resulting identity persists at
 `/var/lib/codex-desktop/tailscale` and is reused after container recreation and
