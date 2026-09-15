@@ -38,7 +38,7 @@ exec /usr/bin/x11vnc \
   -auth "${xauthority}" \
   -rfbauth "${password_file}" \
   -rfbport 5900 \
-  -listen 127.0.0.1 \
+  -listen 127.0.0.2 \
   -no6 \
   -forever \
   -shared

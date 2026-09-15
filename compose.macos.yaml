@@ -1,0 +1,23 @@
+services:
+  desktop:
+    # The official Linux desktop packages are currently AMD64. Docker Desktop
+    # runs this image through Apple silicon's configured AMD64 emulation.
+    platform: linux/amd64
+    volumes:
+      - type: volume
+        source: codex-home
+        target: /home/codex
+      - type: volume
+        source: codex-tailscale
+        target: /var/lib/tailscale
+      - type: volume
+        source: codex-machine
+        target: /var/lib/codex-desktop-persistent
+
+volumes:
+  codex-home:
+    name: ${VOLUME_PREFIX:-codex-desktop}-home
+  codex-tailscale:
+    name: ${VOLUME_PREFIX:-codex-desktop}-tailscale
+  codex-machine:
+    name: ${VOLUME_PREFIX:-codex-desktop}-machine

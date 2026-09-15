@@ -5,6 +5,11 @@ install -d -m 0755 /run/dbus /run/tailscale /var/lib/tailscale
 install -d -o codex -g codex -m 0700 /run/codex-desktop
 install -d -m 0700 /var/lib/codex-desktop-persistent
 test -d /home/codex
+# Linux installs pre-create the bind source as UID 10001. Docker Desktop uses
+# a named volume whose root is initially owned by root. Normalize only the
+# mount root so both persistence backends present the same private home.
+chown codex:codex /home/codex
+setpriv --reuid=10001 --regid=10001 --init-groups chmod 0700 /home/codex
 chrome_profile_dir=/home/codex/.config/google-chrome
 
 machine_id_file=/var/lib/codex-desktop-persistent/machine-id
@@ -15,6 +20,10 @@ fi
 install -o root -g root -m 0444 "${machine_id_file}" /etc/machine-id
 
 if [[ ! -e /home/codex/.codex-desktop-initialized ]]; then
+  # Docker named volumes are populated from the image before first start, and
+  # intermediate directories can retain root ownership. This runs only for a
+  # fresh home; established credential state is never recursively rewritten.
+  chown -R codex:codex /home/codex
   setpriv --reuid=10001 --regid=10001 --init-groups \
     cp -R /opt/codex-desktop-home-skel/. /home/codex/
   setpriv --reuid=10001 --regid=10001 --init-groups \
@@ -36,7 +45,7 @@ setpriv --reuid=10001 --regid=10001 --init-groups \
 
 # This is a service-managed autostart contract. Refresh it on image upgrades so
 # existing persistent homes gain the supervised Codex launcher.
-install -o codex -g codex -m 0644 \
+setpriv --reuid=10001 --regid=10001 --init-groups install -m 0644 \
   /opt/codex-desktop-home-skel/.config/autostart/codex.desktop \
   /home/codex/.config/autostart/codex.desktop
 

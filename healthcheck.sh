@@ -46,7 +46,7 @@ tailscale_ip="$(
 if [[ -n "${tailscale_ip}" ]]; then
   supervisorctl status novnc | grep -Eq '^[^[:space:]]+[[:space:]]+RUNNING([[:space:]]|$)'
   curl --fail --silent --show-error --max-time 5 \
-    "http://${tailscale_ip}:6080/vnc.html" | grep -qi noVNC
+    "http://127.0.0.1:6080/vnc.html" | grep -qi noVNC
 fi
 
 # Before CRD is registered there is intentionally no graphical session. Once
@@ -79,7 +79,7 @@ if compgen -G '/home/codex/.config/chrome-remote-desktop/host#*.json' >/dev/null
     x11vnc_command="$(tr '\0' ' ' <"/proc/${x11vnc_command}/cmdline")"
     [[ "${x11vnc_command}" == *"-display ${display}"* ]]
     [[ "${x11vnc_command}" == *"-auth ${xauthority}"* ]]
-    exec 3<>/dev/tcp/127.0.0.1/5900
+    exec 3<>/dev/tcp/127.0.0.2/5900
     IFS= read -r -t 2 rfb_banner <&3
     exec 3>&-
     [[ "${rfb_banner}" == RFB* ]]

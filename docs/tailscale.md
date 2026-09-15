@@ -1,8 +1,10 @@
 # Tailscale operations
 
 Tailscale is the container's only inbound network. Docker publishes no host
-ports. Tailscale SSH provides administrative shell access, and noVNC listens
-only on the active Tailscale IPv4.
+ports. `tailscaled` runs with `--tun=userspace-networking`, so it requires no
+TUN device or network-administration capabilities. Tailscale SSH provides the
+administrative shell, and the userspace netstack forwards tailnet TCP 6080 to
+noVNC on container loopback.
 
 ## How the tailnet is selected
 
@@ -126,12 +128,19 @@ sudo docker exec codex-desktop-desktop-1 tailscale ip -4
 sudo docker exec codex-desktop-desktop-1 tailscale ping PEER_NAME
 ```
 
-The daemon state is `/var/lib/tailscale/tailscaled.state`, backed by the host
-directory `/var/lib/codex-desktop/tailscale`. Its local socket is
+The daemon state is `/var/lib/tailscale/tailscaled.state`. Ubuntu backs it with
+the host directory `/var/lib/codex-desktop/tailscale`; Apple silicon uses the
+named Docker volume `codex-desktop-tailscale`. Its local socket is
 `/run/tailscale/tailscaled.sock`, which is ephemeral and recreated at startup.
 
 Do not print the state file or copy it into Git. Treat it as authentication
 material.
+
+Because the daemon uses userspace networking, the operating system does not
+receive a Tailscale network interface. Tailscale SSH is handled by the daemon,
+and incoming tailnet TCP connections are forwarded by its netstack to matching
+container-loopback listeners. Ordinary Codex and Chrome internet traffic keeps
+using Docker's normal outbound network.
 
 ## Multiple accounts
 
@@ -162,9 +171,10 @@ After configuring the password and starting the CRD desktop session, open:
 http://codex-desktop:6080/vnc.html?autoconnect=1&resize=scale
 ```
 
-The noVNC listener follows the active Tailscale IPv4 and restarts if that
-address changes. Tailnet ACLs must allow intended viewers to reach TCP 6080.
-Docker does not publish TCP 6080, and raw VNC TCP 5900 is loopback-only.
+Tailnet ACLs must allow intended viewers to reach TCP 6080. Tailscale's
+userspace netstack forwards that traffic to `127.0.0.1:6080`. Docker does not
+publish TCP 6080. Raw VNC uses `127.0.0.2:5900`, outside the netstack's
+same-port localhost forwarding target.
 
 ## Restart and recovery
 
@@ -193,3 +203,4 @@ Tailscale IP before considering recovery complete.
 - [`tailscale up` reference](https://tailscale.com/docs/reference/tailscale-cli/up)
 - [Tailscale SSH](https://tailscale.com/docs/features/tailscale-ssh)
 - [Fast user switching](https://tailscale.com/kb/1225/fast-user-switching)
+- [Userspace networking mode](https://tailscale.com/docs/concepts/userspace-networking)

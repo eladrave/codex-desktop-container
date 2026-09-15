@@ -2,6 +2,13 @@
 set -Eeuo pipefail
 
 repo_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# Keep one public installer entry point. Apple silicon uses Docker Desktop,
+# named volumes, and launchd rather than the Ubuntu systemd/AppArmor layout.
+if [[ "$(uname -s)" == Darwin && "$(uname -m)" == arm64 ]]; then
+  exec bash "${repo_dir}/scripts/install-macos.sh" "$@"
+fi
+
 service_dir=/opt/services/codex-desktop
 config_dir=/etc/codex-desktop
 config_file=${config_dir}/deploy.env
@@ -41,6 +48,10 @@ fi
 die() {
   printf 'Error: %s\n' "$*" >&2
   exit 1
+}
+
+repo_git() {
+  git -c "safe.directory=${repo_dir}" -C "${repo_dir}" "$@"
 }
 
 cleanup_tailscale_secret() {
@@ -197,7 +208,15 @@ for command_name in docker git jq tar systemctl apparmor_parser; do
 done
 docker compose version >/dev/null 2>&1 || die 'Docker Compose v2 is required.'
 docker info >/dev/null 2>&1 || die 'Docker Engine is unavailable.'
-[[ -c /dev/net/tun ]] || die '/dev/net/tun is required.'
+[[ -z "${DOCKER_HOST:-}" ]] || die 'Unset DOCKER_HOST; remote Docker daemons are not supported.'
+docker_endpoint="$(docker context inspect "$(docker context show)" \
+  --format '{{.Endpoints.docker.Host}}')"
+case "${docker_endpoint}" in
+  unix:///var/run/docker.sock|unix:///run/docker.sock) ;;
+  *) die "The active Docker context is not a local system socket: ${docker_endpoint}" ;;
+esac
+export DOCKER_HOST="${docker_endpoint}"
+unset DOCKER_CONTEXT || true
 if [[ ! -r /sys/module/apparmor/parameters/enabled ]] || \
   ! grep -Fq Y /sys/module/apparmor/parameters/enabled; then
   die 'AppArmor must be enabled on the host.'
@@ -205,15 +224,22 @@ fi
 docker info --format '{{json .SecurityOptions}}' | grep -q apparmor || \
   die 'Docker is not reporting AppArmor support.'
 if docker info --format '{{json .SecurityOptions}}' | grep -q rootless; then
-  die 'Rootless Docker is not supported by this TUN/AppArmor deployment.'
+  die 'Rootless Docker is not supported by this systemd/AppArmor deployment.'
 fi
-git -C "${repo_dir}" rev-parse --is-inside-work-tree >/dev/null 2>&1 || \
+repo_git rev-parse --is-inside-work-tree >/dev/null 2>&1 || \
   die 'Run this installer from the repository clone.'
-[[ -z "$(git -C "${repo_dir}" status --porcelain)" ]] || \
+[[ -z "$(repo_git status --porcelain)" ]] || \
   die 'The repository must be clean so the deployed source matches its commit.'
 
-default_image_ref="$(read_existing_value IMAGE_REF \
-  'codex-desktop:chatgpt-26.820.60940-crd-152.0.7977.9-ts1.102.2-9')"
+source_revision="$(repo_git rev-parse HEAD)"
+short_revision="${source_revision:0:12}"
+commit_image_ref="codex-desktop:chatgpt-26.820.60940-crd-152.0.7977.9-ts1.102.2-10-g${short_revision}"
+if [[ -r "${service_dir}/REVISION" && \
+  "$(<"${service_dir}/REVISION")" == "${source_revision}" ]]; then
+  default_image_ref="$(read_existing_value IMAGE_REF "${commit_image_ref}")"
+else
+  default_image_ref="${commit_image_ref}"
+fi
 default_container_hostname="$(read_existing_value CONTAINER_HOSTNAME codex-desktop)"
 default_tailscale_hostname="$(read_existing_value TAILSCALE_HOSTNAME codex-desktop)"
 default_timezone="$(read_existing_value TZ Etc/UTC)"
@@ -294,9 +320,23 @@ mem_reservation_mib="$(memory_to_mib "${mem_reservation}")"
 host_memory_mib="$(awk '/^MemTotal:/ {print int($2 / 1024)}' /proc/meminfo)"
 ((mem_limit_mib <= host_memory_mib)) || \
   die 'Container memory limit exceeds total host memory.'
-prompt_default image_ref 'Immutable image reference to build or use' "${default_image_ref}"
-validate_image_ref "${image_ref}" || die 'Invalid image reference.'
-prompt_yes_no build_image 'Build this image from the checked-out commit?' yes
+while true; do
+  prompt_default image_ref 'Immutable image reference to build or use' "${default_image_ref}"
+  validate_image_ref "${image_ref}" || { printf 'Invalid image reference.\n' >/dev/tty; continue; }
+  if docker image inspect "${image_ref}" >/dev/null 2>&1; then
+    existing_image_revision="$(docker image inspect "${image_ref}" \
+      --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')"
+    if [[ "${existing_image_revision}" != "${source_revision}" ]]; then
+      printf 'That image tag already belongs to another source revision. Enter a new immutable tag.\n' >/dev/tty
+      continue
+    fi
+    build_default=no
+  else
+    build_default=yes
+  fi
+  break
+done
+prompt_yes_no build_image 'Build this image from the checked-out commit?' "${build_default}"
 if [[ "${build_image}" == yes && "${image_ref}" == *@* ]]; then
   die 'A digest reference cannot be used as a docker build tag.'
 fi
@@ -307,7 +347,7 @@ if ((existing_install == 1)); then
 fi
 
 printf '\nConfiguration summary:\n' >/dev/tty
-printf '  Source commit: %s\n' "$(git -C "${repo_dir}" rev-parse HEAD)" >/dev/tty
+printf '  Source commit: %s\n' "${source_revision}" >/dev/tty
 printf '  Image: %s\n' "${image_ref}" >/dev/tty
 printf '  Container hostname: %s\n' "${container_hostname}" >/dev/tty
 printf '  Tailscale hostname: %s\n' "${tailscale_hostname}" >/dev/tty
@@ -321,7 +361,6 @@ prompt_yes_no proceed 'Install this configuration?' no
 
 install -d -o root -g root -m 0700 /var/backups/codex-desktop
 available_kib="$(df -Pk /var/backups | awk 'NR == 2 {print $4}')"
-source_revision="$(git -C "${repo_dir}" rev-parse HEAD)"
 if [[ "${build_image}" == yes ]]; then
   required_kib=10485760
 else
@@ -336,8 +375,11 @@ fi
 
 if [[ "${build_image}" == yes ]]; then
   if docker image inspect "${image_ref}" >/dev/null 2>&1; then
-    die 'The selected image tag already exists. Choose a new immutable tag or use the existing image without rebuilding.'
+    printf 'Matching immutable image already exists; reusing it.\n' >/dev/tty
+    build_image=no
   fi
+fi
+if [[ "${build_image}" == yes ]]; then
   docker build --pull --platform linux/amd64 \
     --build-arg "VCS_REF=${source_revision}" \
     --tag "${image_ref}" "${repo_dir}"
@@ -385,8 +427,8 @@ if [[ -d /var/lib/codex-desktop ]]; then
 fi
 
 stage_dir="$(mktemp -d /opt/services/.codex-desktop-stage.XXXXXXXXXX)"
-git -C "${repo_dir}" archive --format=tar HEAD | tar -x -C "${stage_dir}"
-git -C "${repo_dir}" rev-parse HEAD >"${stage_dir}/REVISION"
+repo_git archive --format=tar HEAD | tar -x -C "${stage_dir}"
+repo_git rev-parse HEAD >"${stage_dir}/REVISION"
 if [[ -d "${service_dir}" ]]; then
   previous_dir="${service_dir}.previous.$(date -u '+%Y%m%dT%H%M%SZ')"
   mv "${service_dir}" "${previous_dir}"

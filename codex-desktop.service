@@ -9,6 +9,7 @@ Type=oneshot
 RemainAfterExit=yes
 WorkingDirectory=/opt/services/codex-desktop
 EnvironmentFile=/etc/codex-desktop/deploy.env
+Environment=DOCKER_HOST=unix:///var/run/docker.sock
 ExecStartPre=/usr/bin/install -d -o 10001 -g 10001 -m 0700 /var/lib/codex-desktop/home
 ExecStartPre=/usr/bin/install -d -o 0 -g 0 -m 0700 /var/lib/codex-desktop/tailscale
 ExecStartPre=/usr/bin/install -d -o 0 -g 0 -m 0700 /var/lib/codex-desktop/machine

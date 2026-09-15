@@ -18,16 +18,12 @@ services:
       CHROME_REMOTE_DESKTOP_DEFAULT_DESKTOP_SIZES: ${DESKTOP_SIZES:-1920x1080,2560x1440}
       CHROME_REMOTE_DESKTOP_USE_XVFB: "1"
       LIBGL_ALWAYS_SOFTWARE: "1"
-    devices:
-      - /dev/net/tun:/dev/net/tun
     cap_drop:
       - ALL
     cap_add:
       - CHOWN
       - DAC_OVERRIDE
       - KILL
-      - NET_ADMIN
-      - NET_RAW
       - SETGID
       - SETUID
     security_opt:

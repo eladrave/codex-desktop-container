@@ -16,13 +16,17 @@ bash -n \
   run-x11vnc.sh \
   start-host-wrapper.sh \
   scripts/install.sh \
+  scripts/install-macos.sh \
   scripts/verify-deployment.sh \
+  scripts/verify-macos.sh \
+  tests/bootstrap-contract.test.sh \
   tests/chrome-launch.test.sh \
   tests/codex-launch.test.sh \
   tests/install-contract.test.sh \
   tests/novnc-contract.test.sh \
   tests/session-handoff.test.sh \
   scripts/validate.sh
+sh -n bootstrap.sh
 sh -n chrome-remote-desktop-session
 
 if command -v shellcheck >/dev/null 2>&1; then
@@ -39,18 +43,23 @@ if command -v shellcheck >/dev/null 2>&1; then
     run-x11vnc.sh \
     start-host-wrapper.sh \
     scripts/install.sh \
+    scripts/install-macos.sh \
     scripts/verify-deployment.sh \
+    scripts/verify-macos.sh \
+    tests/bootstrap-contract.test.sh \
     tests/chrome-launch.test.sh \
     tests/codex-launch.test.sh \
     tests/install-contract.test.sh \
     tests/novnc-contract.test.sh \
     tests/session-handoff.test.sh \
     scripts/validate.sh
+  shellcheck --shell=sh bootstrap.sh
 else
   echo "shellcheck is unavailable; skipped" >&2
 fi
 
 bash tests/chrome-launch.test.sh
+bash tests/bootstrap-contract.test.sh
 bash tests/codex-launch.test.sh
 bash tests/install-contract.test.sh
 bash tests/novnc-contract.test.sh
@@ -59,6 +68,11 @@ bash tests/session-handoff.test.sh
 docker compose \
   --env-file deploy.env.example \
   -f compose.yaml \
+  config --quiet
+docker compose \
+  --env-file deploy.env.example \
+  -f compose.yaml \
+  -f compose.macos.yaml \
   config --quiet
 
 if command -v systemd-analyze >/dev/null 2>&1; then

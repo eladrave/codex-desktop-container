@@ -19,6 +19,37 @@ and checksums are pinned in the `Dockerfile` for reproducible builds.
 - [Agent deployment question and execution playbook](docs/agent-deployment.md)
 - [Security boundaries](SECURITY.md)
 
+## One-line guided installation
+
+Run this from an interactive terminal on Ubuntu 24.04 AMD64 or Apple silicon
+macOS:
+
+```sh
+curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/eladrave/codex-desktop-container/main/bootstrap.sh | sh
+```
+
+The bootstrap detects the platform, asks before installing missing host
+prerequisites, clones one exact repository revision, and invokes the same
+`./scripts/install.sh` entry point on both platforms. The installer then builds
+the pinned AMD64 image, asks all non-secret configuration questions, enrolls
+Tailscale through a hidden auth-key prompt or browser URL, optionally configures
+noVNC, starts the container, and prints the remaining Google/Codex steps.
+
+For review-before-execution, download and inspect the bootstrap first:
+
+```sh
+curl --proto '=https' --tlsv1.2 -fsSLo bootstrap.sh \
+  https://raw.githubusercontent.com/eladrave/codex-desktop-container/main/bootstrap.sh
+less bootstrap.sh
+sh bootstrap.sh
+```
+
+On Apple silicon, Docker Desktop runs the official AMD64 Linux packages through
+emulation and stores credential state in named Docker volumes. The installer
+adds a user launch agent that starts Docker Desktop and this Compose project at
+login. Scheduled tasks still require the Mac to remain powered on, awake, and
+logged in; macOS sleep suspends Docker Desktop and the container.
+
 ## What persists
 
 The Compose configuration keeps the state that must survive container
@@ -30,13 +61,20 @@ recreation in these host directories:
 | `/var/lib/codex-desktop/tailscale` | `/var/lib/tailscale` | Tailscale node identity and preferences |
 | `/var/lib/codex-desktop/machine` | `/var/lib/codex-desktop-persistent` | Stable DBus machine identity |
 
+Those host paths apply to Ubuntu. The Apple silicon Compose override uses the
+named volumes `codex-desktop-home`, `codex-desktop-tailscale`, and
+`codex-desktop-machine` for the same container targets.
+
 No ports are published. Tailscale and Chrome Remote Desktop establish outbound
 connections. No Docker socket is mounted, and no existing Codex profile is
 copied into the image.
 
-The noVNC web service binds only to the container's Tailscale IPv4 address on
-TCP 6080. Its private x11vnc backend binds only to container loopback on TCP
-5900. Neither port is published by Docker.
+Tailscale runs entirely in userspace, so the container needs no TUN device or
+network-administration capabilities. The noVNC web service and its private
+x11vnc backend bind only to container loopback on TCP 6080 and 5900. Tailscale's
+userspace netstack forwards tailnet TCP 6080 to `127.0.0.1:6080`. The raw VNC
+backend uses `127.0.0.2:5900`, rather than the netstack's same-port localhost
+target. Neither port is published by Docker.
 
 Codex and Chrome are started by Xfce, inherit the Chrome Remote Desktop display
 and session bus, and use single-instance restart wrappers for unattended work.
@@ -45,10 +83,9 @@ approval model; this image does not open a raw Chrome debugging port.
 
 ## Requirements
 
-- Ubuntu 24.04 or another compatible AMD64 Linux Docker host
-- Docker Engine with the Compose plugin
-- AppArmor tools on an AppArmor-enabled host
-- `/dev/net/tun`
+- Ubuntu 24.04 AMD64, or Apple silicon macOS
+- Docker Engine with Compose on Linux, or Docker Desktop on macOS
+- AppArmor tools on an AppArmor-enabled Linux host
 - A Tailscale account and policy that permits Tailscale SSH
 - A tailnet ACL permitting intended viewers to reach this node on TCP 6080
 - A Google account authorized for Chrome Remote Desktop
@@ -72,9 +109,9 @@ and do not add host-sensitive mounts such as the Docker socket.
 git clone https://github.com/eladrave/codex-desktop-container.git
 cd codex-desktop-container
 revision="$(git rev-parse HEAD)"
-docker build \
+docker buildx build --platform linux/amd64 --load \
   --build-arg "VCS_REF=${revision}" \
-  --tag codex-desktop:chatgpt-26.820.60940-crd-152.0.7977.9-ts1.102.2-9 \
+  --tag codex-desktop:chatgpt-26.820.60940-crd-152.0.7977.9-ts1.102.2-10 \
   .
 ```
 
@@ -82,13 +119,18 @@ Every downloaded Debian package is checked against its pinned SHA-256 digest.
 If an upstream version changes, update the version, versioned URL, and checksum
 together and rebuild as a new immutable image tag.
 
-## Guided installation
+## Guided installation from a clone
 
-On an Ubuntu 24.04 AMD64 Docker host, clone the repository and run:
+The same command works from a clean clone on both supported platforms:
 
 ```bash
-sudo ./scripts/install.sh
+./scripts/install.sh
 ```
+
+On Ubuntu the script requests root through the documented `sudo` bootstrap
+path and installs a systemd service. When run directly on Ubuntu, invoke it as
+`sudo ./scripts/install.sh`. On Apple silicon, run it as the normal user; it
+uses Docker Desktop, named volumes, and a user launch agent.
 
 The installer asks for the host configuration, Tailscale enrollment method,
 and optional noVNC setup. A one-time Tailscale auth key is accepted only through

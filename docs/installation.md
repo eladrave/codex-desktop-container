@@ -6,19 +6,36 @@ Desktop, and tailnet-only noVNC are the supported access paths.
 
 ## Requirements
 
-- Ubuntu 24.04 AMD64 host
-- Root or sudo access
-- Docker Engine and Docker Compose v2
-- Git, jq, tar, and `apparmor_parser`
-- `/dev/net/tun`
+- Ubuntu 24.04 AMD64 with root/sudo access, or Apple silicon macOS with an
+  administrator account for optional Docker Desktop installation
+- Docker Engine and Docker Compose v2 on Linux, or Docker Desktop on macOS
+- Git and tar; Linux also requires jq and `apparmor_parser`
 - At least 8 GiB host memory recommended
 - A Tailscale account with permission to add the device
 - A Google account authorized for Chrome Remote Desktop
 - An interactive trusted terminal for secret and PIN entry
 
-The installer intentionally stops when a prerequisite is missing. Install and
-verify host prerequisites before rerunning it. It does not alter the host
-firewall, install Docker, or publish network ports.
+The one-line bootstrap asks before installing missing prerequisites. On Linux
+it can configure Docker's official apt repository. On macOS it can install the
+official Apple silicon Docker Desktop application, then waits for the user to
+complete Docker's first-run and licensing screens. Neither path alters the host
+firewall or publishes network ports.
+
+Tailscale runs inside the container with `--tun=userspace-networking`. It does
+not require `/dev/net/tun`, `NET_ADMIN`, or `NET_RAW` on either host.
+
+## One-line bootstrap
+
+Run from an interactive terminal:
+
+```sh
+curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/eladrave/codex-desktop-container/main/bootstrap.sh | sh
+```
+
+The bootstrap detects the supported platform, prepares prerequisites only
+after confirmation, clones the selected repository revision, displays its full
+commit SHA, and invokes `scripts/install.sh`. All installer prompts read from
+the controlling terminal, not from the curl pipe.
 
 ## Guided installation
 
@@ -27,8 +44,13 @@ Clone the repository on the target host and run:
 ```bash
 git clone https://github.com/eladrave/codex-desktop-container.git
 cd codex-desktop-container
-sudo ./scripts/install.sh
+./scripts/install.sh
 ```
+
+On Ubuntu, run `sudo ./scripts/install.sh`. On Apple silicon, run the same file
+as the normal logged-in user. It dispatches internally to the platform-specific
+lifecycle implementation while preserving the same questions and security
+contract.
 
 The repository must be clean. This ensures the deployed source archive exactly
 matches the commit reported by Git.
@@ -70,6 +92,12 @@ The installer:
 - preserves an existing working Tailscale identity;
 - performs a new Tailscale enrollment only when needed;
 - removes the temporary auth-key file immediately after enrollment.
+
+On Ubuntu it installs the committed source under `/opt/services/codex-desktop`
+and manages `codex-desktop.service`. On Apple silicon it installs under
+`~/.local/share/codex-desktop`, uses named Docker volumes for the three
+persistent state stores, and installs a per-user launch agent that starts Docker
+Desktop and the Compose project at login.
 
 If noVNC or CRD setup is intentionally deferred, use
 `verify-deployment.sh --allow-incomplete` for base checks. The normal verifier
@@ -141,9 +169,10 @@ open from an allowed tailnet device:
 http://codex-desktop:6080/vnc.html?autoconnect=1&resize=scale
 ```
 
-Replace `codex-desktop` with the configured Tailscale hostname. TCP 6080 binds
-only to the container's Tailscale IPv4. Raw VNC on TCP 5900 remains on container
-loopback.
+Replace `codex-desktop` with the configured Tailscale hostname. Tailscale's
+userspace netstack forwards tailnet TCP 6080 to noVNC on container loopback.
+Raw VNC uses the separate loopback address `127.0.0.2:5900`, outside the
+netstack's same-port localhost forwarding target.
 
 ## Register Chrome Remote Desktop
 
@@ -206,6 +235,12 @@ Run on the host:
 sudo /opt/services/codex-desktop/scripts/verify-deployment.sh
 ```
 
+On Apple silicon, run:
+
+```bash
+~/.local/share/codex-desktop/source/scripts/verify-macos.sh
+```
+
 Then perform the interactive acceptance checks:
 
 1. Connect through Chrome Remote Desktop.
@@ -224,10 +259,11 @@ this service, and creates a consistent root-only backup under
 systemd unit, and the complete persistent state tree. The previous source is
 also retained beside `/opt/services/codex-desktop`.
 
-Every behavior or package update must use a new immutable image tag. The
-installer refuses to overwrite an existing local tag and records the source Git
-revision in the image label and deployed `REVISION` file. This ensures that the
-old environment still resolves to the old image ID.
+Every behavior or package update uses a commit-derived immutable image tag. A
+second run at the same commit reuses only an image whose revision label matches;
+a tag belonging to any other revision is rejected. The installer also records
+the source Git revision in the image label and deployed `REVISION` file. This
+ensures that the old environment still resolves to the old image ID.
 
 On activation failure, the installer attempts to restore the previous source,
 environment, and unit and restart the prior service. For a manual rollback:
@@ -243,3 +279,22 @@ Restore `persistent-state.tar` only for state corruption or a failed state
 migration, not for an ordinary image rollback. State restoration replaces
 credential-bearing browser, Codex, CRD, and Tailscale data and therefore needs
 separate explicit approval and a preserved rollback copy.
+
+On macOS, upgrades create stopped-state archives under
+`~/.local/share/codex-desktop/backups`. The archives contain all three named
+volumes and must be treated as credential-bearing data. Image rollback keeps
+the named volumes unchanged. Restoring volume archives is a separate,
+destructive recovery operation and is not performed automatically.
+
+## Apple silicon operating boundary
+
+The official Codex, Chrome Remote Desktop, and Chrome packages in this image
+are AMD64. Docker Desktop runs them through Apple silicon emulation. The
+installer verifies the Docker memory allocation and performs an AMD64 image
+smoke check, but the operator must still complete real CRD, Codex, Chrome,
+noVNC, restart-persistence, and scheduled-task acceptance.
+
+The installed launch agent starts Docker Desktop and the Compose project when
+the user logs in. It cannot run while the Mac is powered off, logged out, or
+asleep. Configure macOS power settings appropriate for the intended scheduled
+work and keep the user session logged in.

@@ -27,3 +27,9 @@ registration, Chrome profile, and noVNC password across upgrades. Build every
 change under a new immutable image tag and validate the real Tailscale, CRD,
 noVNC, Codex, Chrome-extension, restart-persistence, and scheduled-task
 workflows before reporting a deployment complete.
+
+`scripts/install.sh` is the single public installer entry point. It supports
+Ubuntu 24.04 AMD64 through systemd/AppArmor and Apple silicon macOS through
+Docker Desktop, named volumes, and launchd. Tailscale must remain in userspace
+mode on both platforms; do not add `/dev/net/tun`, `NET_ADMIN`, or `NET_RAW`.
+Use `scripts/verify-macos.sh` for macOS acceptance.

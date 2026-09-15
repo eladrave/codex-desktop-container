@@ -14,8 +14,8 @@ workflow.
 Ask only for decisions not already answered by current context or an applicable
 host-specific runbook.
 
-1. **Target host:** Which Ubuntu 24.04 AMD64 host should receive the deployment,
-   and what approved SSH alias should the agent use?
+1. **Target host:** Is the local target Ubuntu 24.04 AMD64 or Apple silicon
+   macOS? For a remote Linux host, what approved SSH alias should the agent use?
 2. **Existing installation:** Is this a fresh install or an upgrade that must
    preserve the existing home, Tailscale identity, machine identity, CRD
    registration, browser profile, and noVNC password?
@@ -54,10 +54,12 @@ Tailscale and the CRD desktop session.
 Verify:
 
 - target identity and approved SSH path;
-- Ubuntu 24.04 and AMD64;
-- Docker Engine and Compose v2;
-- AppArmor tooling;
-- `/dev/net/tun`;
+- Ubuntu 24.04 AMD64 or Apple silicon macOS;
+- Docker Engine/Compose or Docker Desktop;
+- AppArmor tooling on Linux, or Docker Desktop memory/emulation readiness on
+  macOS;
+- userspace Tailscale is configured without `/dev/net/tun`, `NET_ADMIN`, or
+  `NET_RAW`;
 - available memory and disk;
 - repository status and exact commit;
 - existing service, container, image, and persistent-state paths;
@@ -72,8 +74,11 @@ ambiguous existing deployment or conflicting service ownership.
 From a clean clone on the authorized target host:
 
 ```bash
-sudo ./scripts/install.sh
+./scripts/install.sh
 ```
+
+Use `sudo ./scripts/install.sh` on Ubuntu and the normal user on macOS. The
+one-line bootstrap invokes this same entry point after platform detection.
 
 Use an interactive TTY. Answer the non-secret configuration prompts from the
 user's confirmed choices.
@@ -124,6 +129,9 @@ Run:
 ```bash
 sudo /opt/services/codex-desktop/scripts/verify-deployment.sh
 ```
+
+On macOS use
+`~/.local/share/codex-desktop/source/scripts/verify-macos.sh` instead.
 
 Then complete real workflow acceptance:
 
