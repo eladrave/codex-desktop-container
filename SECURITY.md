@@ -22,7 +22,9 @@ first eight password characters; tailnet identity and ACLs are therefore the
 primary access boundary.
 
 The example configuration deliberately contains no credentials. Authenticate
-Tailscale and Chrome Remote Desktop interactively after the container starts.
+Tailscale interactively after the container starts. Ubuntu also requires
+interactive Chrome Remote Desktop registration; Apple silicon does not install
+CRD.
 
 The one-line bootstrap is mutable when fetched from the `main` branch. For
 review-sensitive environments, download and inspect `bootstrap.sh` before
@@ -46,10 +48,9 @@ Apple silicon backups under `~/.local/share/codex-desktop/backups` contain the
 same credential-bearing state exported from named Docker volumes. Keep that
 directory private and apply the same encryption and retention rules.
 
-The Apple silicon Compose override sets `GODEBUG=cpu.avx2=off` to avoid a
-Go/Rosetta cryptographic implementation bug. Tailscale still performs its
-normal encrypted Noise and WireGuard protocols; only the faulty emulated AVX2
-optimization is disabled.
+Apple silicon images use native ARM64 packages throughout and omit Chrome
+Remote Desktop. Do not add the unavailable AMD64 CRD package through multiarch
+or reintroduce Rosetta into this security boundary.
 
 Report a suspected vulnerability privately through GitHub's security advisory
 interface for this repository. Do not open a public issue containing secrets.

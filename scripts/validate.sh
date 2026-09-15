@@ -9,6 +9,8 @@ bash -n \
   configure-novnc.sh \
   entrypoint.sh \
   healthcheck.sh \
+  run-session.sh \
+  run-local-desktop.sh \
   run-codex.sh \
   run-crd.sh \
   run-chrome.sh \
@@ -23,6 +25,7 @@ bash -n \
   tests/chrome-launch.test.sh \
   tests/codex-launch.test.sh \
   tests/install-contract.test.sh \
+  tests/local-session-contract.test.sh \
   tests/novnc-contract.test.sh \
   tests/session-handoff.test.sh \
   scripts/validate.sh
@@ -36,6 +39,8 @@ if command -v shellcheck >/dev/null 2>&1; then
     configure-novnc.sh \
     entrypoint.sh \
     healthcheck.sh \
+    run-session.sh \
+    run-local-desktop.sh \
     run-codex.sh \
     run-crd.sh \
     run-chrome.sh \
@@ -50,6 +55,7 @@ if command -v shellcheck >/dev/null 2>&1; then
     tests/chrome-launch.test.sh \
     tests/codex-launch.test.sh \
     tests/install-contract.test.sh \
+    tests/local-session-contract.test.sh \
     tests/novnc-contract.test.sh \
     tests/session-handoff.test.sh \
     scripts/validate.sh
@@ -62,6 +68,7 @@ bash tests/chrome-launch.test.sh
 bash tests/bootstrap-contract.test.sh
 bash tests/codex-launch.test.sh
 bash tests/install-contract.test.sh
+bash tests/local-session-contract.test.sh
 bash tests/novnc-contract.test.sh
 bash tests/session-handoff.test.sh
 

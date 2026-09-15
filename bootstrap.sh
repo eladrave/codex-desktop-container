@@ -210,13 +210,6 @@ prepare_docker_macos() {
     docker_desktop_installed=1
   fi
 
-  if ! pkgutil --pkg-info com.apple.pkg.RosettaUpdateAuto >/dev/null 2>&1; then
-    say 'Rosetta 2 substantially improves this AMD64 image on Apple silicon.'
-    if ask_yes_no 'Install Rosetta 2 and accept the Apple software license?' yes; then
-      sudo softwareupdate --install-rosetta --agree-to-license
-    fi
-  fi
-
   if [ "${docker_ready}" -eq 0 ]; then
     if docker desktop start >/dev/null 2>&1; then
       :

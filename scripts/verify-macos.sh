@@ -37,6 +37,13 @@ container_image_id="$(docker inspect "${container_name}" --format '{{.Image}}')"
 image_revision="$(docker image inspect "${container_image_id}" \
   --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')"
 [[ "${image_revision}" == "${deployed_revision}" ]]
+[[ "$(docker image inspect "${container_image_id}" \
+  --format '{{index .Config.Labels "io.tailscale.binary.arch"}}')" == arm64 ]]
+[[ "$(docker image inspect "${container_image_id}" \
+  --format '{{index .Config.Labels "io.codex-desktop.image.arch"}}')" == arm64 ]]
+[[ "$(docker image inspect "${container_image_id}" \
+  --format '{{index .Config.Labels "io.google.chrome-remote-desktop.enabled"}}')" == 0 ]]
+[[ "$(docker image inspect "${container_image_id}" --format '{{.Architecture}}')" == arm64 ]]
 
 state="$(docker inspect "${container_name}" \
   --format '{{.State.Status}} {{.State.Health.Status}} {{json .NetworkSettings.Ports}}')"
@@ -50,7 +57,11 @@ grep -Fqx 'volume codex-desktop-machine /var/lib/codex-desktop-persistent' <<<"$
 docker exec "${container_name}" /usr/local/sbin/codex-desktop-healthcheck
 docker exec "${container_name}" supervisorctl status
 docker exec "${container_name}" dpkg-query -W \
-  chatgpt chrome-remote-desktop google-chrome-stable novnc websockify x11vnc
+  chatgpt google-chrome-stable novnc websockify x11vnc xvfb
+docker exec "${container_name}" sh -c \
+  '! dpkg-query -W chrome-remote-desktop >/dev/null 2>&1'
+docker exec "${container_name}" supervisorctl status desktop-session | \
+  grep -Eq '^[^[:space:]]+[[:space:]]+RUNNING([[:space:]]|$)'
 docker exec "${container_name}" grep -Fq -- \
   '--tun=userspace-networking' /etc/supervisor/conf.d/codex-desktop.conf
 
@@ -61,20 +72,7 @@ tailscale_summary="$(docker exec "${container_name}" sh -c \
 printf 'Tailscale: %s\n' "${tailscale_summary}"
 docker exec "${container_name}" test ! -e /run/secrets/tailscale-auth-key
 
-crd_status=NOT_REGISTERED
-if docker exec "${container_name}" \
-  bash -c "compgen -G '/home/codex/.config/chrome-remote-desktop/host#*.json' >/dev/null"; then
-  crd_status="$(docker exec "${container_name}" \
-    setpriv --reuid=10001 --regid=10001 --init-groups \
-    env HOME=/home/codex USER=codex LOGNAME=codex SHELL=/bin/bash \
-    /opt/google/chrome-remote-desktop/chrome-remote-desktop --get-status)"
-  [[ "${crd_status}" == STARTED ]]
-fi
-printf 'Chrome Remote Desktop: %s\n' "${crd_status}"
-if [[ "${crd_status}" != STARTED && "${allow_incomplete}" == 0 ]]; then
-  echo 'Chrome Remote Desktop is not registered and STARTED.' >&2
-  exit 1
-fi
+printf 'Chrome Remote Desktop: not installed on ARM64\n'
 
 novnc_configured=0
 if docker exec "${container_name}" test -s /home/codex/.vnc/passwd; then
@@ -90,7 +88,7 @@ if [[ "${novnc_configured}" == 0 && "${allow_incomplete}" == 0 ]]; then
   exit 1
 fi
 
-if [[ "${crd_status}" == STARTED && "${novnc_configured}" == 1 ]]; then
+if [[ "${novnc_configured}" == 1 ]]; then
   listeners="$(docker exec "${container_name}" ss -lnt)"
   grep -Eq '127\.0\.0\.2:5900[[:space:]]' <<<"${listeners}"
   grep -Eq '127\.0\.0\.1:6080[[:space:]]' <<<"${listeners}"
@@ -110,8 +108,7 @@ if [[ "${crd_status}" == STARTED && "${novnc_configured}" == 1 ]]; then
   fi
 fi
 
-if [[ "${allow_incomplete}" == 1 && \
-  ("${crd_status}" != STARTED || "${novnc_configured}" == 0) ]]; then
+if [[ "${allow_incomplete}" == 1 && "${novnc_configured}" == 0 ]]; then
   printf 'Base macOS deployment checks passed; user-only setup remains incomplete.\n'
 else
   printf 'Codex Desktop macOS deployment verification passed.\n'

@@ -165,7 +165,7 @@ instances with separate Tailscale state and hostnames.
 
 ## noVNC over Tailscale
 
-After configuring the password and starting the CRD desktop session, open:
+After configuring the password and starting the managed desktop session, open:
 
 ```text
 http://codex-desktop:6080/vnc.html?autoconnect=1&resize=scale

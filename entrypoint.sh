@@ -36,12 +36,16 @@ setpriv --reuid=10001 --regid=10001 --init-groups \
   /home/codex/.codex \
   /home/codex/.config \
   /home/codex/.config/autostart \
-  /home/codex/.config/chrome-remote-desktop \
   "${chrome_profile_dir}" \
   /home/codex/.local \
   /home/codex/.local/share \
   /home/codex/.vnc \
   /home/codex/Projects
+
+if [[ "${CODEX_DESKTOP_CRD_ENABLED:-1}" == 1 ]]; then
+  setpriv --reuid=10001 --regid=10001 --init-groups \
+    install -d -m 0700 /home/codex/.config/chrome-remote-desktop
+fi
 
 # This is a service-managed autostart contract. Refresh it on image upgrades so
 # existing persistent homes gain the supervised Codex launcher.

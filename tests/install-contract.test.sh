@@ -35,10 +35,14 @@ grep -Fq 'noVNC password is not configured.' scripts/verify-deployment.sh
 grep -Fq 'test ! -e /run/secrets/tailscale-auth-key' scripts/verify-deployment.sh
 grep -Fq 'ss -lnt' scripts/verify-deployment.sh
 grep -Fq 'test -x /usr/bin/ss' Dockerfile
+grep -Fq 'TAILSCALE_ELF_MACHINE_HEX="3e00"' Dockerfile
+grep -Fq 'CODEX_DESKTOP_TAILSCALE_ELF_MACHINE_HEX' Dockerfile healthcheck.sh
 grep -Fq 'status --json 2>/dev/null || true' healthcheck.sh
 grep -Fq "CHROME_REMOTE_DESKTOP_DEFAULT_DESKTOP_SIZES: \${DESKTOP_SIZES" compose.yaml
 grep -Fq -- '--tun=userspace-networking' supervisord.conf
-grep -Fq 'platform: linux/amd64' compose.macos.yaml
+grep -Fq 'platform: linux/arm64' compose.macos.yaml
+grep -Fq 'INSTALL_CRD=0' scripts/install-macos.sh
+grep -Fq 'io.google.chrome-remote-desktop.enabled' Dockerfile scripts/verify-macos.sh
 grep -Fq 'type: volume' compose.macos.yaml
 grep -Fq 'raw.githubusercontent.com/eladrave/codex-desktop-container/main/bootstrap.sh' bootstrap.sh README.md
 

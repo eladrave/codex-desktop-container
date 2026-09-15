@@ -17,8 +17,18 @@ if grep -Fq 'scripts/install-macos.sh"' bootstrap.sh; then
   exit 1
 fi
 grep -Fq 'exec bash "${repo_dir}/scripts/install-macos.sh" "$@"' scripts/install.sh
-grep -Fq 'platform: linux/amd64' compose.macos.yaml
-grep -Fq 'GODEBUG: cpu.avx2=off' compose.macos.yaml
+grep -Fq 'platform: linux/arm64' compose.macos.yaml
+grep -Fq 'CODEX_DESKTOP_CRD_ENABLED: "0"' compose.macos.yaml
+grep -Fq 'TAILSCALE_BINARY_PLATFORM=linux/arm64' scripts/install-macos.sh
+grep -Fq 'TAILSCALE_BINARY_ARCH=arm64' scripts/install-macos.sh
+grep -Fq 'TAILSCALE_ELF_MACHINE_HEX=b700' scripts/install-macos.sh
+grep -Fq 'io.tailscale.binary.arch' Dockerfile scripts/verify-macos.sh
+grep -Fq 'INSTALL_CRD=0' scripts/install-macos.sh
+if rg -n 'GODEBUG=cpu\.avx2|install-rosetta|--platform linux/amd64' \
+  bootstrap.sh scripts/install-macos.sh compose.macos.yaml; then
+  echo 'Apple silicon runtime must remain native ARM64 without Rosetta workarounds.' >&2
+  exit 1
+fi
 grep -Fq 'codex-desktop-home' scripts/verify-macos.sh
 grep -Fq -- '--tun=userspace-networking' supervisord.conf
 

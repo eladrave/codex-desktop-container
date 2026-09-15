@@ -12,7 +12,7 @@ Desktop, and tailnet-only noVNC are the supported access paths.
 - Git and tar; Linux also requires jq and `apparmor_parser`
 - At least 8 GiB host memory recommended
 - A Tailscale account with permission to add the device
-- A Google account authorized for Chrome Remote Desktop
+- On Ubuntu only, a Google account authorized for Chrome Remote Desktop
 - An interactive trusted terminal for secret and PIN entry
 
 The one-line bootstrap asks before installing missing prerequisites. On Linux
@@ -61,7 +61,7 @@ The installer asks, in order, for:
 2. Tailscale/MagicDNS hostname.
 3. Expected Tailscale account or tailnet label for operator confirmation.
 4. Timezone.
-5. Permitted Chrome Remote Desktop sizes.
+5. Permitted desktop sizes.
 6. Container memory limit.
 7. Container memory reservation.
 8. CPU limit.
@@ -75,8 +75,9 @@ The installer asks, in order, for:
 15. Confirmation that the resulting identity belongs to the intended tailnet.
 16. Whether to configure the persistent noVNC password.
 
-It then prints the ordered user-only steps for Chrome Remote Desktop, Codex
-sign-in, the Chrome extension, and optional full CDP access.
+It then prints the ordered user-only steps for Codex sign-in, the Chrome
+extension, and optional full CDP access. Ubuntu also prints the Chrome Remote
+Desktop registration steps.
 
 The installer:
 
@@ -99,9 +100,9 @@ and manages `codex-desktop.service`. On Apple silicon it installs under
 persistent state stores, and installs a per-user launch agent that starts Docker
 Desktop and the Compose project at login.
 
-If noVNC or CRD setup is intentionally deferred, use
-`verify-deployment.sh --allow-incomplete` for base checks. The normal verifier
-fails until both CRD and noVNC are fully configured.
+If noVNC or Ubuntu CRD setup is intentionally deferred, use the platform
+verifier with `--allow-incomplete` for base checks. The normal Ubuntu verifier
+requires both CRD and noVNC; the macOS verifier requires noVNC.
 
 ## Tailscale enrollment
 
@@ -162,8 +163,7 @@ The password file persists at `/home/codex/.vnc/passwd`. Classic VNC uses only
 the first eight password characters, so use a unique random value and rely on
 tailnet identity and ACLs as the primary boundary.
 
-After Chrome Remote Desktop is registered and the desktop session is running,
-open from an allowed tailnet device:
+After the desktop session is running, open from an allowed tailnet device:
 
 ```text
 http://codex-desktop:6080/vnc.html?autoconnect=1&resize=scale
@@ -174,7 +174,10 @@ userspace netstack forwards tailnet TCP 6080 to noVNC on container loopback.
 Raw VNC uses the separate loopback address `127.0.0.2:5900`, outside the
 netstack's same-port localhost forwarding target.
 
-## Register Chrome Remote Desktop
+## Register Chrome Remote Desktop on Ubuntu
+
+Skip this section on Apple silicon. Its native ARM64 image does not install
+Chrome Remote Desktop and uses noVNC as the graphical access path.
 
 This step requires a short-lived Google authorization code and a PIN chosen by
 the user. Neither value belongs in chat, Git, logs, or a saved command.
@@ -200,7 +203,7 @@ the host configuration under the persistent home.
 Verify without displaying the host configuration contents:
 
 ```bash
-supervisorctl status chrome-remote-desktop
+supervisorctl status desktop-session
 setpriv --reuid=10001 --regid=10001 --init-groups \
   env HOME=/home/codex USER=codex LOGNAME=codex SHELL=/bin/bash \
   /opt/google/chrome-remote-desktop/chrome-remote-desktop --get-status
@@ -210,8 +213,9 @@ Expected status is `STARTED`.
 
 ## Connect Codex and Chrome
 
-Connect through Chrome Remote Desktop or noVNC. Codex and Chrome start in the
-same Xfce session and automatically recover from process exits.
+Connect through noVNC on Apple silicon, or through Chrome Remote Desktop or
+noVNC on Ubuntu. Codex and Chrome start in the same Xfce session and
+automatically recover from process exits.
 
 1. Sign in to Codex.
 2. Open **Settings > Computer Use**.
@@ -243,12 +247,14 @@ On Apple silicon, run:
 
 Then perform the interactive acceptance checks:
 
-1. Connect through Chrome Remote Desktop.
-2. Connect through noVNC and confirm it shows the same desktop and Chrome tabs.
-3. Run a real `@Chrome` action from Codex.
-4. Restart only `codex-desktop.service`.
-5. Confirm Tailscale identity, CRD registration, Codex sign-in, Chrome extension,
+1. Connect through noVNC. On Ubuntu, also connect through Chrome Remote Desktop
+   and confirm both show the same desktop and Chrome tabs.
+2. Run a real `@Chrome` action from Codex.
+3. Restart only `codex-desktop.service` on Ubuntu or the Compose project on
+   macOS.
+4. Confirm Tailscale identity, Codex sign-in, Chrome extension,
    cookies, and noVNC password all survive.
+5. On Ubuntu, confirm CRD registration also survives.
 6. Trigger one scheduled task without leaving a remote viewer attached.
 
 ## Upgrade and rollback
@@ -288,16 +294,15 @@ destructive recovery operation and is not performed automatically.
 
 ## Apple silicon operating boundary
 
-The official Codex, Chrome Remote Desktop, and Chrome packages in this image
-are AMD64. Docker Desktop runs them through Apple silicon emulation. The
-installer verifies the Docker memory allocation and performs an AMD64 image
-smoke check, but the operator must still complete real CRD, Codex, Chrome,
-noVNC, restart-persistence, and scheduled-task acceptance.
+Apple silicon builds a native ARM64 Ubuntu image with the official ARM64 Codex
+and Chrome packages, native Tailscale, Xvfb/Xfce, and noVNC. It does not use
+Rosetta. Chrome Remote Desktop is omitted because Google does not publish the
+pinned Linux CRD release for ARM64.
 
-The macOS override disables only Go's emulated AVX2 path with
-`GODEBUG=cpu.avx2=off`. [Go issue 79205](https://github.com/golang/go/issues/79205)
-documents invalid AVX2 ChaCha20-Poly1305 results under Rosetta 2; without this
-setting, Tailscale enrollment can remain at `NeedsLogin` without printing a URL.
+The installer verifies the Docker memory allocation, package architectures,
+image architecture, Tailscale ELF architecture, and absence of CRD. The
+operator must still complete real Codex, Chrome, noVNC, restart-persistence,
+and scheduled-task acceptance.
 
 The installed launch agent starts Docker Desktop and the Compose project when
 the user logs in. It cannot run while the Mac is powered off, logged out, or

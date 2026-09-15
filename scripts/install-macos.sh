@@ -11,7 +11,13 @@ launch_agent_dir="${HOME}/Library/LaunchAgents"
 launch_agent_file="${launch_agent_dir}/com.eladrave.codex-desktop.plist"
 container_name=codex-desktop-desktop-1
 volume_prefix=codex-desktop
-backup_image='alpine@sha256:14358309a308569c32bdc37e2e0e9694be33a9d99e68afb0f5ff33cc1f695dce'
+backup_image='alpine@sha256:2c9d26f410d032d5b1525aa8a873e238b05b90c4ae8618743d4311f0cc827e37'
+tailscale_arm64_image='tailscale/tailscale@sha256:fdbdb434c50a6d3a5ed73f2b15ef66228dd2d265c1729e55f9a663ae804c5453'
+ubuntu_arm64_image='ubuntu@sha256:ec0b1c9058e44c837a21c3f9d8a3d5e9aaa94ed28edceb18e154af5efecf0950'
+chatgpt_arm64_url='https://persistent.oaistatic.com/codex-app-prod/linux/deb/pool/main/c/chatgpt/chatgpt_26.820.60940_arm64.deb'
+chatgpt_arm64_sha256='8f4dacbff5f054a4f69c2a021f1396c57976972829a61041febac1b423f27c86'
+chrome_arm64_url='https://dl.google.com/linux/chrome/deb/pool/main/g/google-chrome-stable/google-chrome-stable_152.0.7977.64-1_arm64.deb'
+chrome_arm64_sha256='6ccab79a7afe1d174c89e28cf0d5a265e6e8855ff3b45c6a2151a65d7ddae9e8'
 secret_path=/run/secrets/tailscale-auth-key
 temporary_secret_installed=0
 backup_dir=
@@ -29,9 +35,9 @@ usage() {
   cat <<'EOF'
 Usage: ./scripts/install.sh
 
-Guided installer for Apple silicon macOS with Docker Desktop. The official
-AMD64 Linux image runs under Docker Desktop emulation. No host ports are
-published; access remains Tailscale, Chrome Remote Desktop, and tailnet noVNC.
+Guided installer for Apple silicon macOS with Docker Desktop. It builds a
+native ARM64 Codex, Chrome, Tailscale, Xfce, and noVNC image. Chrome Remote
+Desktop is not installed on ARM64. No host ports are published.
 EOF
 }
 
@@ -176,6 +182,7 @@ backup_volume() {
   local volume_name=$1 archive_name=$2
   if docker volume inspect "${volume_name}" >/dev/null 2>&1; then
     docker run --rm \
+      --platform linux/arm64 \
       -v "${volume_name}:/data:ro" \
       -v "${backup_dir}:/backup" \
       "${backup_image}" \
@@ -211,7 +218,7 @@ git -C "${repo_dir}" rev-parse --is-inside-work-tree >/dev/null 2>&1 || \
 
 source_revision="$(git -C "${repo_dir}" rev-parse HEAD)"
 short_revision="${source_revision:0:12}"
-commit_image_ref="codex-desktop:chatgpt-26.820.60940-crd-152.0.7977.9-ts1.102.2-10-g${short_revision}"
+commit_image_ref="codex-desktop:chatgpt-26.820.60940-chrome-152.0.7977.64-ts1.102.2-arm64-nocrd-11-g${short_revision}"
 default_timezone=Etc/UTC
 timezone_link="$(readlink /etc/localtime 2>/dev/null || true)"
 if [[ "${timezone_link}" == */zoneinfo/* ]]; then
@@ -279,7 +286,7 @@ fi
 
 printf '%s\n' \
   'Codex Desktop guided installation for Apple silicon macOS' \
-  'The AMD64 Linux image runs under Docker Desktop emulation.' \
+  'The native ARM64 image uses no Rosetta emulation and omits Chrome Remote Desktop.' \
   'No public or LAN ports will be published.' \
   '' >/dev/tty
 
@@ -323,7 +330,7 @@ while true; do
   fi
   break
 done
-prompt_yes_no build_image 'Build the AMD64 image from this checked-out commit?' "${build_default}"
+prompt_yes_no build_image 'Build the native ARM64 image from this checked-out commit?' "${build_default}"
 if [[ "${build_image}" == yes && "${image_ref}" == *@* ]]; then
   die 'A digest reference cannot be used as a build tag.'
 fi
@@ -357,8 +364,19 @@ if [[ "${build_image}" == yes ]]; then
   fi
 fi
 if [[ "${build_image}" == yes ]]; then
-  docker buildx build --pull --platform linux/amd64 --load \
+  docker buildx build --pull --platform linux/arm64 --load \
     --build-arg "VCS_REF=${source_revision}" \
+    --build-arg "UBUNTU_BASE_IMAGE=${ubuntu_arm64_image}" \
+    --build-arg 'DESKTOP_ARCH=arm64' \
+    --build-arg 'INSTALL_CRD=0' \
+    --build-arg "CHATGPT_DEB_URL=${chatgpt_arm64_url}" \
+    --build-arg "CHATGPT_DEB_SHA256=${chatgpt_arm64_sha256}" \
+    --build-arg "CHROME_DEB_URL=${chrome_arm64_url}" \
+    --build-arg "CHROME_DEB_SHA256=${chrome_arm64_sha256}" \
+    --build-arg 'TAILSCALE_BINARY_PLATFORM=linux/arm64' \
+    --build-arg 'TAILSCALE_BINARY_ARCH=arm64' \
+    --build-arg 'TAILSCALE_ELF_MACHINE_HEX=b700' \
+    --build-arg "TAILSCALE_BASE_IMAGE=${tailscale_arm64_image}" \
     --tag "${image_ref}" "${repo_dir}"
 else
   docker image inspect "${image_ref}" >/dev/null 2>&1 || die 'The selected image is not available locally.'
@@ -366,8 +384,16 @@ fi
 [[ "$(docker image inspect "${image_ref}" \
   --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" == \
   "${source_revision}" ]] || die 'Image revision label does not match the checked-out commit.'
-docker run --rm --platform linux/amd64 --entrypoint /bin/bash "${image_ref}" \
-  -lc 'grep -Fq -- --tun=userspace-networking /etc/supervisor/conf.d/codex-desktop.conf'
+[[ "$(docker image inspect "${image_ref}" \
+  --format '{{index .Config.Labels "io.tailscale.binary.arch"}}')" == arm64 ]] || \
+  die 'Apple silicon images must contain native ARM64 Tailscale binaries.'
+[[ "$(docker image inspect "${image_ref}" --format '{{.Architecture}}')" == arm64 ]] || \
+  die 'Apple silicon images must use a native ARM64 root filesystem.'
+[[ "$(docker image inspect "${image_ref}" \
+  --format '{{index .Config.Labels "io.google.chrome-remote-desktop.enabled"}}')" == 0 ]] || \
+  die 'Chrome Remote Desktop must be omitted from the Apple silicon image.'
+docker run --rm --platform linux/arm64 --entrypoint /bin/bash "${image_ref}" \
+  -lc 'grep -Fq -- --tun=userspace-networking /etc/supervisor/conf.d/codex-desktop.conf; ! dpkg-query -W chrome-remote-desktop >/dev/null 2>&1'
 
 backup_dir="${backup_root}/$(date -u '+%Y%m%dT%H%M%SZ')"
 install -d -m 0700 "${backup_dir}"
@@ -538,11 +564,8 @@ printf 'Backup: %s\n' "${backup_dir}" >/dev/tty
 printf '%s\n' \
   '' \
   'User-only desktop setup still required:' \
-  '1. Open https://remotedesktop.google.com/headless in the intended Google account.' \
-  '2. Generate the Debian/Linux registration command.' \
-  "3. Connect with: tailscale ssh root@${tailscale_hostname}" \
-  '4. Disable shell history, run the registration command, restore history, and enter the PIN only at its hidden prompt.' \
-  '5. Connect through Chrome Remote Desktop; sign in to Codex.' \
-  '6. Install the Chrome plugin and official extension through Codex settings.' \
-  '7. Test @Chrome, restart the container, and verify sign-in/browser persistence.' \
-  '8. Run ~/.local/share/codex-desktop/source/scripts/verify-macos.sh.' >/dev/tty
+  "1. Open http://${tailscale_hostname}:6080/vnc.html?autoconnect=1&resize=scale from an allowed tailnet device." \
+  '2. Enter the noVNC password and sign in to Codex in the Xfce desktop.' \
+  '3. Install the Chrome plugin and official extension through Codex settings.' \
+  '4. Test @Chrome, restart the container, and verify sign-in/browser persistence.' \
+  '5. Run ~/.local/share/codex-desktop/source/scripts/verify-macos.sh.' >/dev/tty

@@ -22,14 +22,17 @@ Google's registration tool receives it in process arguments, so run that command
 with shell history disabled and never copy the code into chat, logs, commits, or
 reports.
 
-Preserve the persistent home, Tailscale state, machine identity, CRD
-registration, Chrome profile, and noVNC password across upgrades. Build every
-change under a new immutable image tag and validate the real Tailscale, CRD,
-noVNC, Codex, Chrome-extension, restart-persistence, and scheduled-task
-workflows before reporting a deployment complete.
+Preserve the persistent home, Tailscale state, machine identity, Chrome profile,
+noVNC password, and Ubuntu CRD registration across upgrades. Build every change
+under a new immutable image tag and validate the real Tailscale, noVNC, Codex,
+Chrome-extension, restart-persistence, scheduled-task, and platform-specific
+Ubuntu CRD workflows before reporting a deployment complete.
 
 `scripts/install.sh` is the single public installer entry point. It supports
 Ubuntu 24.04 AMD64 through systemd/AppArmor and Apple silicon macOS through
 Docker Desktop, named volumes, and launchd. Tailscale must remain in userspace
 mode on both platforms; do not add `/dev/net/tun`, `NET_ADMIN`, or `NET_RAW`.
 Use `scripts/verify-macos.sh` for macOS acceptance.
+
+Apple silicon must use the native ARM64 image and must not install Chrome Remote
+Desktop. Its graphical access path is tailnet noVNC. Ubuntu AMD64 retains CRD.

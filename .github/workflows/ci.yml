@@ -40,3 +40,12 @@ jobs:
           test "$(docker image inspect codex-desktop:ci \
             --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = \
             "${GITHUB_SHA}"
+          test "$(docker image inspect codex-desktop:ci \
+            --format '{{index .Config.Labels "io.tailscale.binary.arch"}}')" = \
+            "amd64"
+          test "$(docker image inspect codex-desktop:ci \
+            --format '{{index .Config.Labels "io.codex-desktop.image.arch"}}')" = \
+            "amd64"
+          test "$(docker image inspect codex-desktop:ci \
+            --format '{{index .Config.Labels "io.google.chrome-remote-desktop.enabled"}}')" = \
+            "1"

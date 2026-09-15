@@ -1,13 +1,10 @@
 services:
   desktop:
-    # The official Linux desktop packages are currently AMD64. Docker Desktop
-    # runs this image through Apple silicon's configured AMD64 emulation.
-    platform: linux/amd64
+    # Apple silicon uses a native ARM64 image. Chrome Remote Desktop is omitted
+    # because Google does not publish the pinned Linux package for ARM64.
+    platform: linux/arm64
     environment:
-      # Go 1.26's AVX2 ChaCha20-Poly1305 path is unreliable under Rosetta 2.
-      # Disable only that emulated CPU path so Tailscale control-plane Noise
-      # handshakes remain valid; native AMD64 Linux keeps the optimized path.
-      GODEBUG: cpu.avx2=off
+      CODEX_DESKTOP_CRD_ENABLED: "0"
     volumes:
       - type: volume
         source: codex-home
