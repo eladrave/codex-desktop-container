@@ -50,10 +50,12 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         fonts-liberation \
         fonts-noto-color-emoji \
         git \
+        iproute2 \
         jq \
         less \
         locales \
         openssh-client \
+        novnc \
         procps \
         pulseaudio \
         ripgrep \
@@ -64,6 +66,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         tzdata \
         vim-tiny \
         wget \
+        websockify \
         xfce4-panel \
         xfce4-session \
         xfce4-settings \
@@ -73,6 +76,8 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         xfwm4 \
         x11-xserver-utils \
         xauth \
+        x11vnc \
+    && test -x /usr/bin/ss \
     && locale-gen en_US.UTF-8 \
     && groupadd --gid 10001 codex \
     && useradd --uid 10001 --gid 10001 --create-home --shell /bin/bash codex
@@ -111,8 +116,14 @@ COPY supervisord.conf /etc/supervisor/conf.d/codex-desktop.conf
 COPY entrypoint.sh /usr/local/sbin/codex-desktop-entrypoint
 COPY run-crd.sh /usr/local/sbin/run-codex-crd
 COPY configure-crd.sh /usr/local/bin/configure-chrome-remote-desktop
+COPY configure-novnc.sh /usr/local/bin/configure-codex-novnc
 COPY healthcheck.sh /usr/local/sbin/codex-desktop-healthcheck
+COPY run-codex.sh /usr/local/sbin/run-codex-desktop
+COPY run-chrome.sh /usr/local/sbin/run-codex-chrome
+COPY run-x11vnc.sh /usr/local/sbin/run-codex-x11vnc
+COPY run-novnc.sh /usr/local/sbin/run-codex-novnc
 COPY codex-autostart.desktop /opt/codex-desktop-home-skel/.config/autostart/codex.desktop
+COPY chrome-autostart.desktop /etc/xdg/autostart/codex-chrome.desktop
 
 RUN chmod 0755 \
       /usr/local/bin/tailscale \
@@ -120,7 +131,12 @@ RUN chmod 0755 \
       /usr/local/sbin/codex-desktop-entrypoint \
       /usr/local/sbin/run-codex-crd \
       /usr/local/bin/configure-chrome-remote-desktop \
+      /usr/local/bin/configure-codex-novnc \
       /usr/local/sbin/codex-desktop-healthcheck \
+      /usr/local/sbin/run-codex-desktop \
+      /usr/local/sbin/run-codex-chrome \
+      /usr/local/sbin/run-codex-x11vnc \
+      /usr/local/sbin/run-codex-novnc \
       /opt/google/chrome-remote-desktop/start-host \
       /opt/google/chrome-remote-desktop/start-host.real \
       /etc/chrome-remote-desktop-session \
@@ -128,12 +144,14 @@ RUN chmod 0755 \
     && chmod 0644 \
       /etc/supervisor/conf.d/codex-desktop.conf \
       /opt/codex-desktop-home-skel/.config/autostart/codex.desktop \
+      /etc/xdg/autostart/codex-chrome.desktop \
     && install -d -o codex -g codex -m 0700 \
       /home/codex/.cache \
       /home/codex/.codex \
       /home/codex/.config/chrome-remote-desktop \
       /home/codex/.local/share \
       /home/codex/Projects \
+      /home/codex/.vnc \
     && install -d -m 0755 \
       /run/dbus \
       /run/tailscale \
@@ -142,7 +160,11 @@ RUN chmod 0755 \
     && printf '%s\n' 'codex ALL=(root) NOPASSWD: /usr/bin/systemctl enable --now chrome-remote-desktop@codex' \
       > /etc/sudoers.d/codex-crd-systemctl \
     && chmod 0440 /etc/sudoers.d/codex-crd-systemctl \
+    && ln -sf /usr/share/novnc/vnc.html /usr/share/novnc/index.html \
     && rm -f /etc/supervisor/conf.d/supervisord.conf
+
+ARG VCS_REF=""
+LABEL org.opencontainers.image.revision="${VCS_REF}"
 
 WORKDIR /home/codex
 

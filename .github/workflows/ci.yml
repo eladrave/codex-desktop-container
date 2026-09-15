@@ -23,6 +23,7 @@ jobs:
       - name: Build the pinned image
         run: |
           docker build \
+            --build-arg VCS_REF="${GITHUB_SHA}" \
             --tag codex-desktop:ci \
             .
       - name: Verify installed package versions
@@ -36,3 +37,6 @@ jobs:
             test -x /usr/local/bin/tailscale
             test -x /opt/google/chrome-remote-desktop/start-host
           '
+          test "$(docker image inspect codex-desktop:ci \
+            --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = \
+            "${GITHUB_SHA}"

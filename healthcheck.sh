@@ -8,9 +8,80 @@ test "$(dpkg-query -W -f='${Version}' chatgpt)" = "${CODEX_DESKTOP_CHATGPT_VERSI
 test "$(dpkg-query -W -f='${Version}' chrome-remote-desktop)" = "${CODEX_DESKTOP_CRD_VERSION}"
 test "$(dpkg-query -W -f='${Version}' google-chrome-stable)" = "${CODEX_DESKTOP_CHROME_VERSION}"
 test -x /usr/bin/chatgpt
+test -x /usr/bin/google-chrome-stable
+test -x /usr/bin/websockify
+test -x /usr/bin/x11vnc
 test -x /opt/google/chrome-remote-desktop/start-host
 test -x /opt/google/chrome-remote-desktop/start-host.real
 test "$(passwd -S codex | cut -d ' ' -f2)" = "L"
 grep -Fqx 'account sufficient pam_succeed_if.so quiet user = codex' \
   /etc/pam.d/chrome-remote-desktop
-/usr/local/bin/tailscale --socket=/run/tailscale/tailscaled.sock status --json >/dev/null
+# A fresh node is intentionally healthy before enrollment so the operator can
+# reach the guided Tailscale step. Running state is enforced by deployment
+# verification after enrollment; liveness here requires the daemon and socket.
+tailscale_status="$(
+  /usr/local/bin/tailscale --socket=/run/tailscale/tailscaled.sock \
+    status --json 2>/dev/null || true
+)"
+if [[ -n "${tailscale_status}" ]]; then
+  printf '%s' "${tailscale_status}" | jq -e 'type == "object"' >/dev/null
+fi
+
+chrome_main_running() {
+  local candidate command_line
+  while IFS= read -r candidate; do
+    [[ -n "${candidate}" ]] || continue
+    command_line="$(tr '\0' ' ' <"/proc/${candidate}/cmdline" 2>/dev/null || true)"
+    [[ "${command_line}" == *'--user-data-dir=/home/codex/.config/google-chrome'* ]] || continue
+    [[ "${command_line}" == *' --type='* ]] && continue
+    return 0
+  done < <(pgrep -u 10001 -f 'user-data-dir=/home/codex/.config/google-chrome' || true)
+  return 1
+}
+
+tailscale_ip="$(
+  /usr/local/bin/tailscale --socket=/run/tailscale/tailscaled.sock \
+    ip -4 2>/dev/null | head -n 1 || true
+)"
+if [[ -n "${tailscale_ip}" ]]; then
+  supervisorctl status novnc | grep -Eq '^[^[:space:]]+[[:space:]]+RUNNING([[:space:]]|$)'
+  curl --fail --silent --show-error --max-time 5 \
+    "http://${tailscale_ip}:6080/vnc.html" | grep -qi noVNC
+fi
+
+# Before CRD is registered there is intentionally no graphical session. Once
+# registered, the Xfce autostart contract requires a headed Chrome owned by the
+# desktop user so unattended Codex tasks can use the persistent browser.
+if compgen -G '/home/codex/.config/chrome-remote-desktop/host#*.json' >/dev/null; then
+  supervisorctl status chrome-remote-desktop | grep -Eq '^[^[:space:]]+[[:space:]]+RUNNING([[:space:]]|$)'
+  setpriv --reuid=10001 --regid=10001 --init-groups \
+    env HOME=/home/codex USER=codex LOGNAME=codex SHELL=/bin/bash \
+    /opt/google/chrome-remote-desktop/chrome-remote-desktop --get-status | \
+    grep -qx STARTED
+  chrome_main_running
+  pgrep -u 10001 -f '/usr/lib/chatgpt/ChatGPT' >/dev/null
+  setpriv --reuid=10001 --regid=10001 --init-groups \
+    test -w /home/codex/.config/google-chrome
+  if [[ -s /home/codex/.vnc/passwd ]]; then
+    [[ -f /home/codex/.vnc/passwd && ! -L /home/codex/.vnc/passwd ]]
+    [[ "$(stat -c '%u:%g:%a' /home/codex/.vnc/passwd)" == \
+      '10001:10001:600' ]]
+    supervisorctl status x11vnc | grep -Eq '^[^[:space:]]+[[:space:]]+RUNNING([[:space:]]|$)'
+    pgrep -u 10001 -x x11vnc >/dev/null
+    [[ -f /run/codex-desktop/desktop.env && \
+      ! -L /run/codex-desktop/desktop.env ]]
+    [[ "$(stat -c '%u:%g:%a' /run/codex-desktop/desktop.env)" == \
+      '10001:10001:600' ]]
+    display="$(sed -n 's/^DISPLAY=//p' /run/codex-desktop/desktop.env | head -n 1)"
+    xauthority="$(sed -n 's/^XAUTHORITY=//p' /run/codex-desktop/desktop.env | head -n 1)"
+    [[ "${display}" =~ ^:[0-9]+$ && -r "${xauthority}" ]]
+    x11vnc_command="$(pgrep -u 10001 -x x11vnc | head -n 1)"
+    x11vnc_command="$(tr '\0' ' ' <"/proc/${x11vnc_command}/cmdline")"
+    [[ "${x11vnc_command}" == *"-display ${display}"* ]]
+    [[ "${x11vnc_command}" == *"-auth ${xauthority}"* ]]
+    exec 3<>/dev/tcp/127.0.0.1/5900
+    IFS= read -r -t 2 rfb_banner <&3
+    exec 3>&-
+    [[ "${rfb_banner}" == RFB* ]]
+  fi
+fi

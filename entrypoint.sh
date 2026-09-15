@@ -2,8 +2,10 @@
 set -Eeuo pipefail
 
 install -d -m 0755 /run/dbus /run/tailscale /var/lib/tailscale
+install -d -o codex -g codex -m 0700 /run/codex-desktop
 install -d -m 0700 /var/lib/codex-desktop-persistent
 test -d /home/codex
+chrome_profile_dir=/home/codex/.config/google-chrome
 
 machine_id_file=/var/lib/codex-desktop-persistent/machine-id
 if [[ ! -s "${machine_id_file}" ]]; then
@@ -24,9 +26,24 @@ setpriv --reuid=10001 --regid=10001 --init-groups \
   /home/codex/.cache \
   /home/codex/.codex \
   /home/codex/.config \
+  /home/codex/.config/autostart \
   /home/codex/.config/chrome-remote-desktop \
+  "${chrome_profile_dir}" \
   /home/codex/.local \
   /home/codex/.local/share \
+  /home/codex/.vnc \
   /home/codex/Projects
+
+# This is a service-managed autostart contract. Refresh it on image upgrades so
+# existing persistent homes gain the supervised Codex launcher.
+install -o codex -g codex -m 0644 \
+  /opt/codex-desktop-home-skel/.config/autostart/codex.desktop \
+  /home/codex/.config/autostart/codex.desktop
+
+test -w "${chrome_profile_dir}"
+# Chrome can leave these process locks after an unclean container stop. At this
+# point no user session or Chrome process exists, so removing only Singleton*
+# is safe and preserves cookies, extensions, and all other authenticated state.
+rm -f -- "${chrome_profile_dir}"/Singleton*
 
 exec /usr/bin/supervisord --nodaemon --configuration /etc/supervisor/supervisord.conf

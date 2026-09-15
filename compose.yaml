@@ -11,6 +11,7 @@ services:
       LOGNAME: codex
       SHELL: /bin/bash
       CODEX_HOME: /home/codex/.codex
+      CODEX_CHROME_PROFILE_DIR: /home/codex/.config/google-chrome
       TZ: ${TZ:-Etc/UTC}
       TS_STATE_DIR: /var/lib/tailscale
       TS_HOSTNAME: ${TAILSCALE_HOSTNAME:-codex-desktop}
@@ -50,7 +51,7 @@ services:
     tmpfs:
       - /run:rw,nosuid,nodev,mode=0755
       - /tmp:rw,nosuid,nodev,mode=1777
-    shm_size: 1gb
+    shm_size: 2gb
     healthcheck:
       test: ["CMD", "/usr/local/sbin/codex-desktop-healthcheck"]
       interval: 30s
@@ -59,9 +60,9 @@ services:
       start_period: 30s
     restart: unless-stopped
     stop_grace_period: 45s
-    mem_limit: 3g
-    mem_reservation: 512m
-    cpus: 2.0
+    mem_limit: ${MEM_LIMIT:-6g}
+    mem_reservation: ${MEM_RESERVATION:-1g}
+    cpus: ${CPU_LIMIT:-2.0}
     pids_limit: 2048
     logging:
       driver: json-file

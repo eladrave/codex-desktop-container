@@ -1,2 +1,16 @@
 #!/bin/sh
+set -eu
+
+runtime_dir=${CODEX_DESKTOP_RUNTIME_DIR:-/run/codex-desktop}
+session_file=${runtime_dir}/desktop.env
+temporary_file=${session_file}.$$
+
+: "${DISPLAY:?Chrome Remote Desktop did not provide DISPLAY}"
+xauthority=${XAUTHORITY:-/home/codex/.Xauthority}
+
+umask 077
+printf 'DISPLAY=%s\nXAUTHORITY=%s\n' "${DISPLAY}" "${xauthority}" \
+  >"${temporary_file}"
+mv -f "${temporary_file}" "${session_file}"
+
 exec dbus-run-session -- xfce4-session

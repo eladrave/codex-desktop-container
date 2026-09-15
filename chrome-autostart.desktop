@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Google Chrome for Codex
+Comment=Open the persistent browser controlled by Codex
+Exec=/usr/local/sbin/run-codex-chrome
+TryExec=/usr/local/sbin/run-codex-chrome
+Terminal=false
+StartupNotify=true
+X-GNOME-Autostart-enabled=true
