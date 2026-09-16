@@ -53,6 +53,20 @@ setpriv --reuid=10001 --regid=10001 --init-groups install -m 0644 \
   /opt/codex-desktop-home-skel/.config/autostart/codex.desktop \
   /home/codex/.config/autostart/codex.desktop
 
+# Electron delegates ChatGPT sign-in to the system browser. Register Chrome for
+# web URLs and Codex for the OAuth callback before the desktop session starts.
+# xdg-mime updates only these associations and preserves unrelated user choices.
+for mime_type in text/html x-scheme-handler/http x-scheme-handler/https; do
+  setpriv --reuid=10001 --regid=10001 --init-groups \
+    env HOME=/home/codex USER=codex LOGNAME=codex \
+      XDG_CONFIG_HOME=/home/codex/.config \
+    xdg-mime default google-chrome.desktop "${mime_type}"
+done
+setpriv --reuid=10001 --regid=10001 --init-groups \
+  env HOME=/home/codex USER=codex LOGNAME=codex \
+    XDG_CONFIG_HOME=/home/codex/.config \
+  xdg-mime default chatgpt.desktop x-scheme-handler/codex
+
 test -w "${chrome_profile_dir}"
 # Chrome can leave these process locks after an unclean container stop. At this
 # point no user session or Chrome process exists, so removing only Singleton*

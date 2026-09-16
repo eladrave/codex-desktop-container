@@ -217,6 +217,9 @@ Expected status is `STARTED`.
 Connect through noVNC on Apple silicon, or through Chrome Remote Desktop or
 noVNC on Ubuntu. Codex and Chrome start in the same Xfce session and
 automatically recover from process exits.
+At container startup, Chrome is registered as the default HTTP/HTTPS browser
+and Codex is registered for the `codex:` OAuth callback. This lets the Codex
+sign-in button open Chrome and return the completed login to the app.
 
 1. Sign in to Codex.
 2. Open **Settings > Computer Use**.

@@ -38,6 +38,10 @@ grep -Fq 'noVNC password is not configured.' scripts/verify-deployment.sh
 grep -Fq 'test ! -e /run/secrets/tailscale-auth-key' scripts/verify-deployment.sh
 grep -Fq 'ss -lnt' scripts/verify-deployment.sh
 grep -Fq 'test -x /usr/bin/ss' Dockerfile
+grep -Fq 'xdg-mime default google-chrome.desktop' entrypoint.sh
+grep -Fq 'xdg-mime default chatgpt.desktop x-scheme-handler/codex' entrypoint.sh
+grep -Fq "xdg-mime query default \"\${mime_type}\"" healthcheck.sh
+grep -Fq 'xdg-mime query default x-scheme-handler/codex' healthcheck.sh
 grep -Fq 'TAILSCALE_ELF_MACHINE_HEX="3e00"' Dockerfile
 grep -Fq 'CODEX_DESKTOP_TAILSCALE_ELF_MACHINE_HEX' Dockerfile healthcheck.sh
 grep -Fq 'status --json 2>/dev/null || true' healthcheck.sh

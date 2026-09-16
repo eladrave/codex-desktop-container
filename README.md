@@ -86,6 +86,9 @@ target. Neither port is published by Docker.
 
 Codex and Chrome are started by Xfce, share the managed display and session bus,
 and use single-instance restart wrappers for unattended work.
+The container registers Chrome as the default HTTP/HTTPS browser and Codex as
+the `codex:` callback handler so ChatGPT sign-in can complete inside the same
+persistent desktop session.
 Browser control uses the official ChatGPT browser extension and Codex's
 approval model; this image does not open a raw Chrome debugging port.
 

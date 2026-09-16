@@ -10,6 +10,7 @@ test "$(dpkg-query -W -f='${Version}' google-chrome-stable)" = "${CODEX_DESKTOP_
 test "$(dpkg-query -W -f='${Architecture}' google-chrome-stable)" = "${CODEX_DESKTOP_IMAGE_ARCH}"
 test -x /usr/bin/chatgpt
 test -x /usr/bin/google-chrome-stable
+test -x /usr/bin/xdg-mime
 test -x /usr/bin/websockify
 test -x /usr/bin/x11vnc
 test -x /usr/bin/Xvfb
@@ -35,6 +36,16 @@ test "$(od -An -tx1 -j18 -N2 /usr/local/bin/tailscale | tr -d ' \n')" = \
 test "$(od -An -tx1 -j18 -N2 /usr/local/bin/tailscaled | tr -d ' \n')" = \
   "${CODEX_DESKTOP_TAILSCALE_ELF_MACHINE_HEX}"
 test "$(passwd -S codex | cut -d ' ' -f2)" = "L"
+for mime_type in text/html x-scheme-handler/http x-scheme-handler/https; do
+  test "$(setpriv --reuid=10001 --regid=10001 --init-groups \
+    env HOME=/home/codex USER=codex LOGNAME=codex \
+      XDG_CONFIG_HOME=/home/codex/.config \
+    xdg-mime query default "${mime_type}")" = google-chrome.desktop
+done
+test "$(setpriv --reuid=10001 --regid=10001 --init-groups \
+  env HOME=/home/codex USER=codex LOGNAME=codex \
+    XDG_CONFIG_HOME=/home/codex/.config \
+  xdg-mime query default x-scheme-handler/codex)" = chatgpt.desktop
 # A fresh node is intentionally healthy before enrollment so the operator can
 # reach the guided Tailscale step. Running state is enforced by deployment
 # verification after enrollment; liveness here requires the daemon and socket.
