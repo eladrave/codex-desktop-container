@@ -1,25 +1,69 @@
 # Security
 
 Do not commit Tailscale auth keys, Chrome Remote Desktop authorization codes or
-PINs, Codex authentication state, SSH private keys, browser profiles, or files
-from any persistent state directory.
+PINs, Codex authentication state, SSH private keys, browser profiles, gateway
+credentials, Playwright extension tokens, or files from any persistent state
+directory.
 
 Treat `/var/lib/codex-desktop/home/.config/google-chrome` as a credential
 store. It can contain cookies, local storage, installed extensions, and active
 website sessions. Full Chrome DevTools Protocol access is mediated by the Codex
-browser integration and its approval flow. Do not add or publish a raw Chrome
-debugging port through Docker, a reverse proxy, or a host-network mode.
+browser integration and its approval flow. Remote Playwright MCP uses its stock
+browser extension against the same visible Chrome. Do not add
+`--remote-debugging-port`, publish TCP 9222, or expose a raw debugging endpoint
+through Docker, a reverse proxy, Tailscale, or host networking.
 
-noVNC and x11vnc bind only to container loopback. Tailscale runs with
-`--tun=userspace-networking`; its netstack forwards authorized tailnet traffic
-to noVNC on `127.0.0.1:6080`. The raw VNC backend binds to
-`127.0.0.2:5900`, outside the netstack's same-port localhost forwarding target.
-Keep the VNC password file private, require a tailnet ACL for TCP 6080, and do
-not publish TCP 5900 or 6080 through Docker.
-The noVNC page uses HTTP inside the encrypted tailnet, so do not access it over
-an untrusted non-Tailscale route. Classic VNC authentication uses only the
-first eight password characters; tailnet identity and ACLs are therefore the
-primary access boundary.
+Stock Playwright extension mode creates an ephemeral localhost relay and uses
+CDP internally. It is not Chrome's native debugging port, is not routed by the
+gateway, and is not published by Docker. Eliminating that upstream relay would
+require a Playwright patch, which this repository intentionally does not carry.
+Keep the tailnet policy default-deny for every other TCP port on this node;
+grant intended clients only Tailscale SSH and HTTPS 443. Do not use a broad
+`*:*` grant, because userspace networking can forward a tailnet connection to
+a matching localhost listener, including an upstream ephemeral relay.
+
+Tailscale Serve is the default ingress and exposes only HTTPS 443 to the
+authenticated gateway on `127.0.0.1:8443`. MCP, noVNC, and x11vnc bind to
+`127.0.0.2` on ports 8932, 6081, and 5900. Tailscale runs with
+`--tun=userspace-networking`; binding an unauthenticated backend to
+`127.0.0.1` could make the same port tailnet-reachable and bypass the gateway.
+Do not change these backends to `127.0.0.1`, a wildcard address, or IPv6. Do
+not publish any of these ports through Docker.
+
+Temporary guest access is the only supported public ingress. It uses a
+foreground Tailscale Funnel on external HTTPS 8443 and a separate guest-only
+proxy on `127.0.0.1:8444`; it never funnels the permanent gateway on 8443.
+The guest proxy has no MCP, permanent-login, Basic Auth, generic proxy, or
+health route. A 256-bit link token is redeemed at most once for a distinct
+Secure, HttpOnly, SameSite=Strict cookie. Both remain bounded by the original
+30-minute deadline. Revocation or expiry destroys open guest sockets and stops
+the foreground Funnel process. Guest state is memory-only and must not return
+after a broker or container restart.
+
+Creating guest access is a security-sensitive, mutating action. The MCP tool
+must accept no arguments and must be used only after the user explicitly says
+Tailscale is unavailable. Never accept a client-provided port, target, command,
+duration, path, executable, or environment value. Never use `tailscale funnel
+reset`, background Funnel, or the permanent gateway as the Funnel target.
+Treat the guest link as a password-equivalent full-desktop credential. A guest
+who controls this desktop is within the same desktop-user trust boundary as the
+browser and can access visible authenticated state; temporary ingress is not a
+sandbox from the desktop itself.
+
+The noVNC backend intentionally has no inner VNC password because it is
+reachable only through the HTTPS gateway. The gateway requires either its
+one-click token cookie or independent Basic Auth, validates WebSocket requests,
+and discards access logs. Tailnet identity and restrictive ACLs remain the outer
+boundary. A legacy `.vnc/passwd` may remain in persistent state but is unused.
+
+Gateway credentials live under the root-owned persistent machine-state
+directory with mode `0700` for the directory and `0600` for the file. Retrieve
+them only with the TTY-only `remote-browser-credentials` command. The
+Playwright extension token lives in the persistent home, owned by `codex` and
+mode `0600`; enter it only through the hidden
+`remote-browser-extension-token` prompt. Neither secret belongs in
+`deploy.env`, process arguments, chat, logs, or command output captured by an
+agent.
 
 The example configuration deliberately contains no credentials. Authenticate
 Tailscale interactively after the container starts. Ubuntu also requires
@@ -39,8 +83,8 @@ success or failure. Never add an auth key to `deploy.env`, a command argument,
 Git, an image layer, chat, logs, or telemetry.
 
 Upgrade backups under `/var/backups/codex-desktop` contain credential-bearing
-Codex, Chrome, CRD, noVNC, and Tailscale state. Keep the backup directory
-`root:root` mode `0700`, keep archives mode `0600`, encrypt copies before they
+Codex, Chrome, CRD, gateway, Playwright extension, and Tailscale state. Keep the
+backup directory `root:root` mode `0700`, keep archives mode `0600`, encrypt copies before they
 leave the host, and delete retained backups only through a separately approved
 retention process.
 

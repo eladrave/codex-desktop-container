@@ -34,7 +34,8 @@ grep -Fq 'Does this new enrollment belong to the intended account/tailnet?' scri
 grep -Fq 'deployment_activated' scripts/install.sh
 grep -Fq -- '--allow-incomplete' scripts/verify-deployment.sh docs/installation.md
 grep -Fq 'Chrome Remote Desktop is not registered and STARTED.' scripts/verify-deployment.sh
-grep -Fq 'noVNC password is not configured.' scripts/verify-deployment.sh
+grep -Fq 'Playwright MCP extension token is not configured.' \
+  scripts/verify-deployment.sh
 grep -Fq 'test ! -e /run/secrets/tailscale-auth-key' scripts/verify-deployment.sh
 grep -Fq 'ss -lnt' scripts/verify-deployment.sh
 grep -Fq 'test -x /usr/bin/ss' Dockerfile

@@ -26,6 +26,7 @@ had_config_file=0
 had_unit_file=0
 unit_was_enabled=0
 unit_was_active=0
+prior_gateway_credentials_sha=
 
 usage() {
   cat <<'EOF'
@@ -233,7 +234,7 @@ repo_git rev-parse --is-inside-work-tree >/dev/null 2>&1 || \
 
 source_revision="$(repo_git rev-parse HEAD)"
 short_revision="${source_revision:0:12}"
-commit_image_ref="codex-desktop:chatgpt-26.820.60940-crd-152.0.7977.9-ts1.102.2-10-g${short_revision}"
+commit_image_ref="codex-desktop:chatgpt-26.820.60940-crd-154.0.8037.11-ts1.102.4-11-g${short_revision}"
 if [[ -r "${service_dir}/REVISION" && \
   "$(<"${service_dir}/REVISION")" == "${source_revision}" ]]; then
   default_image_ref="$(read_existing_value IMAGE_REF "${commit_image_ref}")"
@@ -259,7 +260,6 @@ cpu_limit=
 image_ref=
 build_image=
 proceed=
-configure_novnc=
 keep_enrollment=
 upgrade_existing=
 confirm_tailnet=
@@ -283,6 +283,14 @@ fi
 if ((container_running == 1 && unit_was_active == 0)); then
   die 'The Codex Desktop container is running outside an active codex-desktop.service. Resolve ownership before installing or backing up state.'
 fi
+gateway_credentials_host=/var/lib/codex-desktop/machine/remote-browser/credentials.env
+if [[ -e "${gateway_credentials_host}" ]]; then
+  [[ -f "${gateway_credentials_host}" && ! -L "${gateway_credentials_host}" ]] || \
+    die 'Existing remote-browser credential state is not a safe regular file.'
+  [[ "$(stat -c '%u:%g:%a' "${gateway_credentials_host}")" == '0:0:600' ]] || \
+    die 'Existing remote-browser credential state has unsafe ownership or permissions.'
+  prior_gateway_credentials_sha="$(sha256sum "${gateway_credentials_host}" | awk '{print $1}')"
+fi
 if ((had_service_dir == 1 || had_config_file == 1 || had_unit_file == 1)) || \
   [[ -d /var/lib/codex-desktop ]]; then
   existing_install=1
@@ -290,7 +298,7 @@ fi
 
 printf '%s\n' \
   'Codex Desktop guided installation' \
-  'No public or LAN ports will be published. Tailscale and CRD remain the access paths.' \
+  'No public or LAN ports will be published. Tailscale HTTPS/SSH and CRD remain the access paths.' \
   '' >/dev/tty
 
 prompt_default container_hostname 'Container hostname' "${default_container_hostname}"
@@ -511,7 +519,7 @@ else
   if [[ "${enrollment_method}" == 1 ]]; then
     printf '%s\n' \
       'Generate a one-time, non-ephemeral auth key in the intended tailnet.' \
-      'Use a tag only when policy intentionally grants that tag the required SSH/noVNC access; pre-approve only when device approval is enabled.' \
+      'Use a tag only when policy intentionally grants that tag the required SSH/HTTPS gateway access; pre-approve only when device approval is enabled.' \
       'Enter it only in the hidden prompt below. Do not paste it into chat.' >/dev/tty
     prompt_secret tailscale_auth_key 'Tailscale auth key'
     [[ -n "${tailscale_auth_key}" ]] || die 'The Tailscale auth key cannot be empty.'
@@ -555,16 +563,23 @@ if ((tailnet_confirmed == 0)); then
     die 'The enrollment was left intact for investigation. Resolve the mismatch explicitly; the installer will not log out or switch it.'
 fi
 
-if [[ -s /var/lib/codex-desktop/home/.vnc/passwd ]]; then
-  printf 'Existing persistent noVNC password was preserved.\n' >/dev/tty
-else
-  prompt_yes_no configure_novnc 'Configure the noVNC password now?' yes
-  if [[ "${configure_novnc}" == yes ]]; then
-    printf '%s\n' \
-      'Use a unique random value. Classic VNC uses only the first eight characters.' \
-      'The tailnet ACL is the primary access boundary.' >/dev/tty
-    docker exec -it "${container_name}" /usr/local/bin/configure-codex-novnc
+serve_ready=0
+for _attempt in $(seq 1 30); do
+  if docker exec "${container_name}" tailscale serve status --json 2>/dev/null | \
+    grep -Fq '127.0.0.1:8443'; then
+    serve_ready=1
+    break
   fi
+  sleep 2
+done
+((serve_ready == 1)) || \
+  die 'Tailscale Serve did not expose the authenticated gateway within 60 seconds.'
+
+"${service_dir}/scripts/verify-deployment.sh" --allow-incomplete
+if [[ -n "${prior_gateway_credentials_sha}" ]]; then
+  current_gateway_credentials_sha="$(sha256sum "${gateway_credentials_host}" | awk '{print $1}')"
+  [[ "${current_gateway_credentials_sha}" == "${prior_gateway_credentials_sha}" ]] || \
+    die 'Remote-browser gateway credentials changed during the upgrade; the previous deployment remains backed up.'
 fi
 
 printf '\nHost deployment and Tailscale enrollment completed.\n' >/dev/tty
@@ -580,6 +595,10 @@ printf '%s\n' \
   '6. Enter the CRD PIN only at its hidden prompt.' \
   '7. Connect through Chrome Remote Desktop; sign in to Codex.' \
   '8. In Codex Settings > Computer Use, install the Chrome plugin and official extension.' \
-  '9. Confirm Chrome shows Manage and test one @Chrome action.' \
-  '10. Enable full CDP only if the scheduled task genuinely needs it.' \
-  '11. Run sudo /opt/services/codex-desktop/scripts/verify-deployment.sh.' >/dev/tty
+  '9. In the same Chrome profile, install the Playwright MCP extension and obtain its connection token.' \
+  '10. Run remote-browser-extension-token and enter that token only at its hidden prompt.' \
+  '11. Run remote-browser-credentials only in this trusted TTY to retrieve the MCP and one-click noVNC details.' \
+  '12. Confirm Chrome shows Manage, test one @Chrome action, and test one MCP browser action.' \
+  '13. Enable Codex full CDP only if a scheduled task genuinely needs it; the remote MCP does not require it.' \
+  '14. Run sudo /opt/services/codex-desktop/scripts/verify-deployment.sh.' \
+  '15. Optional: run sudo /opt/services/codex-desktop/scripts/install-functional-canary.sh to validate and schedule the hourly MCP canary.' >/dev/tty

@@ -4,6 +4,7 @@ set -Eeuo pipefail
 install -d -m 0755 /run/dbus /run/tailscale /var/lib/tailscale
 install -d -o codex -g codex -m 0700 /run/codex-desktop
 install -d -m 0700 /var/lib/codex-desktop-persistent
+install -d -o root -g codex -m 0750 /run/remote-browser
 test -d /home/codex
 # Linux installs pre-create the bind source as UID 10001. Docker Desktop uses
 # a named volume whose root is initially owned by root. Normalize only the
@@ -36,6 +37,7 @@ setpriv --reuid=10001 --regid=10001 --init-groups \
   /home/codex/.codex \
   /home/codex/.config \
   /home/codex/.config/autostart \
+  /home/codex/.config/remote-browser \
   "${chrome_profile_dir}" \
   /home/codex/.local \
   /home/codex/.local/share \
@@ -72,5 +74,9 @@ test -w "${chrome_profile_dir}"
 # point no user session or Chrome process exists, so removing only Singleton*
 # is safe and preserves cookies, extensions, and all other authenticated state.
 rm -f -- "${chrome_profile_dir}"/Singleton*
+
+# Create gateway credentials once in the persistent machine volume. The helper
+# is deliberately silent and never places generated values in process args.
+/opt/codex-desktop/remote-browser/prepare-credentials.sh
 
 exec /usr/bin/supervisord --nodaemon --configuration /etc/supervisor/supervisord.conf

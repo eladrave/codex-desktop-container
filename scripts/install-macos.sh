@@ -12,7 +12,7 @@ launch_agent_file="${launch_agent_dir}/com.eladrave.codex-desktop.plist"
 container_name=codex-desktop-desktop-1
 volume_prefix=codex-desktop
 backup_image='alpine@sha256:2c9d26f410d032d5b1525aa8a873e238b05b90c4ae8618743d4311f0cc827e37'
-tailscale_arm64_image='tailscale/tailscale@sha256:fdbdb434c50a6d3a5ed73f2b15ef66228dd2d265c1729e55f9a663ae804c5453'
+tailscale_arm64_image='tailscale/tailscale@sha256:5789311e4ab3bcf6cfb88020def1ce6c8cfebacfd6a369f06b103a8feee0eedc'
 ubuntu_arm64_image='ubuntu@sha256:ec0b1c9058e44c837a21c3f9d8a3d5e9aaa94ed28edceb18e154af5efecf0950'
 chatgpt_arm64_url='https://persistent.oaistatic.com/codex-app-prod/linux/deb/pool/main/c/chatgpt/chatgpt_26.820.60940_arm64.deb'
 chatgpt_arm64_sha256='8f4dacbff5f054a4f69c2a021f1396c57976972829a61041febac1b423f27c86'
@@ -31,6 +31,7 @@ had_config=0
 had_launcher=0
 had_launch_agent=0
 launch_agent_was_loaded=0
+prior_gateway_credentials_sha=
 
 usage() {
   cat <<'EOF'
@@ -262,7 +263,7 @@ git -C "${repo_dir}" rev-parse --is-inside-work-tree >/dev/null 2>&1 || \
 
 source_revision="$(git -C "${repo_dir}" rev-parse HEAD)"
 short_revision="${source_revision:0:12}"
-commit_image_ref="codex-desktop:chatgpt-26.820.60940-chrome-152.0.7977.64-ts1.102.2-arm64-nocrd-11-g${short_revision}"
+commit_image_ref="codex-desktop:chatgpt-26.820.60940-chrome-152.0.7977.64-ts1.102.4-arm64-nocrd-12-g${short_revision}"
 default_timezone=Etc/UTC
 timezone_link="$(readlink /etc/localtime 2>/dev/null || true)"
 if [[ "${timezone_link}" == */zoneinfo/* ]]; then
@@ -296,7 +297,6 @@ upgrade_existing=
 proceed=
 keep_enrollment=
 confirm_tailnet=
-configure_novnc=
 
 existing_install=0
 [[ ! -f "${config_file}" ]] || had_config=1
@@ -326,6 +326,13 @@ fi
 if docker inspect "${container_name}" >/dev/null 2>&1 && \
   [[ ! -f "${config_file}" || ! -f "${source_dir}/compose.yaml" ]]; then
   die 'An existing container is present without its managed source/config. Resolve it before installing.'
+fi
+if docker inspect "${container_name}" --format '{{.State.Running}}' 2>/dev/null | \
+  grep -Fqx true && docker exec "${container_name}" \
+  test -f /var/lib/codex-desktop-persistent/remote-browser/credentials.env; then
+  prior_gateway_credentials_sha="$(docker exec "${container_name}" \
+    sha256sum /var/lib/codex-desktop-persistent/remote-browser/credentials.env | \
+    awk '{print $1}')"
 fi
 
 printf '%s\n' \
@@ -588,16 +595,26 @@ if ((tailnet_confirmed == 0)); then
   [[ "${confirm_tailnet}" == yes ]] || die 'Enrollment was preserved for explicit investigation.'
 fi
 
-if docker exec "${container_name}" test -s /home/codex/.vnc/passwd; then
-  printf 'Existing persistent noVNC password was preserved.\n' >/dev/tty
-else
-  prompt_yes_no configure_novnc 'Configure the noVNC password now?' yes
-  if [[ "${configure_novnc}" == yes ]]; then
-    docker exec -it "${container_name}" /usr/local/bin/configure-codex-novnc
+serve_ready=0
+for _attempt in $(seq 1 30); do
+  if docker exec "${container_name}" tailscale serve status --json 2>/dev/null | \
+    grep -Fq '127.0.0.1:8443'; then
+    serve_ready=1
+    break
   fi
-fi
+  sleep 2
+done
+((serve_ready == 1)) || \
+  die 'Tailscale Serve did not expose the authenticated gateway within 60 seconds.'
 
 "${source_dir}/scripts/verify-macos.sh" --allow-incomplete
+if [[ -n "${prior_gateway_credentials_sha}" ]]; then
+  current_gateway_credentials_sha="$(docker exec "${container_name}" \
+    sha256sum /var/lib/codex-desktop-persistent/remote-browser/credentials.env | \
+    awk '{print $1}')"
+  [[ "${current_gateway_credentials_sha}" == "${prior_gateway_credentials_sha}" ]] || \
+    die 'Remote-browser gateway credentials changed during the upgrade; the previous deployment remains backed up.'
+fi
 if ((launch_agent_was_loaded == 0)); then
   launchctl bootstrap "gui/${UID}" "${launch_agent_file}"
 fi
@@ -608,8 +625,11 @@ printf 'Backup: %s\n' "${backup_dir}" >/dev/tty
 printf '%s\n' \
   '' \
   'User-only desktop setup still required:' \
-  "1. Open http://${tailscale_hostname}:6080/vnc.html?autoconnect=1&resize=scale from an allowed tailnet device." \
-  '2. Enter the noVNC password and sign in to Codex in the Xfce desktop.' \
+  '1. Run remote-browser-credentials only in a trusted interactive container TTY.' \
+  '2. Open the displayed one-click noVNC HTTPS URL and sign in to Codex in Xfce.' \
   '3. Install the Chrome plugin and official extension through Codex settings.' \
-  '4. Test @Chrome, restart the container, and verify sign-in/browser persistence.' \
-  '5. Run ~/.local/share/codex-desktop/source/scripts/verify-macos.sh.' >/dev/tty
+  '4. Install the Playwright MCP extension in the same Chrome profile.' \
+  '5. Run remote-browser-extension-token and enter its token only at the hidden prompt.' \
+  '6. Test @Chrome and remote MCP, restart the container, and verify persistence.' \
+  '7. Run ~/.local/share/codex-desktop/source/scripts/verify-macos.sh.' \
+  '8. Optional: run ~/.local/share/codex-desktop/source/scripts/install-functional-canary.sh to validate and schedule the hourly MCP canary.' >/dev/tty

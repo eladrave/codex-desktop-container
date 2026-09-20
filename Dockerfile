@@ -1,7 +1,9 @@
 # syntax=docker/dockerfile:1.7
 
 ARG UBUNTU_BASE_IMAGE="ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
-ARG TAILSCALE_BASE_IMAGE="tailscale/tailscale@sha256:4107a12b1a0466bb3f2c968d5fa35acf509cd7865a958ce1af36724e9f016342"
+ARG TAILSCALE_BASE_IMAGE="tailscale/tailscale@sha256:9482efa70e5e37180a74ad17e01fb0a43ec4b629cdde1a28a9fb79597bca63e2"
+ARG NODE_BASE_IMAGE="node:22-bookworm-slim@sha256:48e4b67d85f87bd551df43704e24d252f56cc5f8e9718841aace50f19948f0f9"
+ARG CADDY_BASE_IMAGE="caddy:2.10.2-alpine@sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d"
 ARG TAILSCALE_BINARY_PLATFORM="linux/amd64"
 ARG TAILSCALE_BINARY_ARCH="amd64"
 ARG TAILSCALE_ELF_MACHINE_HEX="3e00"
@@ -9,19 +11,29 @@ ARG DESKTOP_ARCH="amd64"
 ARG INSTALL_CRD="1"
 
 FROM --platform=${TAILSCALE_BINARY_PLATFORM} ${TAILSCALE_BASE_IMAGE} AS tailscale
+FROM ${CADDY_BASE_IMAGE} AS caddy
+FROM ${NODE_BASE_IMAGE} AS playwright-mcp
+
+ARG PLAYWRIGHT_MCP_VERSION="0.0.82"
+
+RUN npm install --global --omit=dev "@playwright/mcp@${PLAYWRIGHT_MCP_VERSION}" \
+    && test "$(playwright-mcp --version)" = "Version ${PLAYWRIGHT_MCP_VERSION}" \
+    && npm cache clean --force
+
 FROM ${UBUNTU_BASE_IMAGE}
 
 ARG TAILSCALE_BINARY_ARCH
 ARG TAILSCALE_ELF_MACHINE_HEX
 ARG DESKTOP_ARCH
 ARG INSTALL_CRD
+ARG PLAYWRIGHT_MCP_VERSION="0.0.82"
 
 ARG CHATGPT_VERSION="26.820.60940"
 ARG CHATGPT_DEB_URL="https://persistent.oaistatic.com/codex-app-prod/linux/deb/pool/main/c/chatgpt/chatgpt_26.820.60940_amd64.deb"
 ARG CHATGPT_DEB_SHA256="31d956a8c6c515f8d87e0b7acd9ec919f7e685ba59331b4b97aa45f853afdfd7"
-ARG CRD_VERSION="152.0.7977.9"
-ARG CRD_DEB_URL="https://dl.google.com/linux/chrome-remote-desktop/deb/pool/main/c/chrome-remote-desktop/chrome-remote-desktop_152.0.7977.9_amd64.deb"
-ARG CRD_DEB_SHA256="fc6e10808f589a0475ce20a0038c902701e9e59cfb0ac810a45116f8c057f9e7"
+ARG CRD_VERSION="154.0.8037.11"
+ARG CRD_DEB_URL="https://dl.google.com/linux/chrome-remote-desktop/deb/pool/main/c/chrome-remote-desktop/chrome-remote-desktop_154.0.8037.11_amd64.deb"
+ARG CRD_DEB_SHA256="572dee08ca024f922a4c35b4b028abda348c9b54f12888eaaae53f6870dd5924"
 ARG CHROME_VERSION="152.0.7977.64-1"
 ARG CHROME_DEB_URL="https://dl.google.com/linux/chrome/deb/pool/main/g/google-chrome-stable/google-chrome-stable_152.0.7977.64-1_amd64.deb"
 ARG CHROME_DEB_SHA256="4eae0736a812d9bc851cd2937f7af00e47dbaf8305845eed452703ff009873c7"
@@ -34,7 +46,8 @@ LABEL org.opencontainers.image.title="codex-desktop" \
       io.codex-desktop.image.arch="${DESKTOP_ARCH}" \
       io.google.chrome-remote-desktop.enabled="${INSTALL_CRD}" \
       io.google.chrome-remote-desktop.version="${CRD_VERSION}" \
-      io.google.chrome.version="${CHROME_VERSION}"
+      io.google.chrome.version="${CHROME_VERSION}" \
+      io.playwright.mcp.version="${PLAYWRIGHT_MCP_VERSION}"
 
 ENV DEBIAN_FRONTEND=noninteractive \
     LANG=en_US.UTF-8 \
@@ -52,6 +65,8 @@ ENV DEBIAN_FRONTEND=noninteractive \
     CODEX_DESKTOP_CRD_ENABLED=${INSTALL_CRD} \
     CODEX_DESKTOP_CRD_VERSION=${CRD_VERSION} \
     CODEX_DESKTOP_CHROME_VERSION=${CHROME_VERSION} \
+    PLAYWRIGHT_MCP_VERSION=${PLAYWRIGHT_MCP_VERSION} \
+    REMOTE_BROWSER_PLAYBOOK=/opt/codex-desktop/remote-browser/browser-playbook.md \
     LIBGL_ALWAYS_SOFTWARE=1
 
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
@@ -75,6 +90,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         novnc \
         procps \
         pulseaudio \
+        python3 \
         ripgrep \
         sudo \
         supervisor \
@@ -98,7 +114,10 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     && test -x /usr/bin/ss \
     && locale-gen en_US.UTF-8 \
     && groupadd --gid 10001 codex \
-    && useradd --uid 10001 --gid 10001 --create-home --shell /bin/bash codex
+    && useradd --uid 10001 --gid 10001 --create-home --shell /bin/bash codex \
+    && groupadd --gid 10002 remote-guest \
+    && useradd --uid 10002 --gid 10002 --no-create-home \
+      --home-dir /nonexistent --shell /usr/sbin/nologin remote-guest
 
 RUN set -eux; \
     package_dir="$(mktemp -d)"; \
@@ -134,8 +153,12 @@ RUN if [ "${INSTALL_CRD}" = 1 ]; then \
 
 COPY --from=tailscale /usr/local/bin/tailscale /usr/local/bin/tailscale
 COPY --from=tailscale /usr/local/bin/tailscaled /usr/local/bin/tailscaled
+COPY --from=caddy /usr/bin/caddy /tmp/caddy
+COPY --from=playwright-mcp /usr/local/ /usr/local/
 
-RUN test "$(od -An -tx1 -j18 -N2 /usr/local/bin/tailscale | tr -d ' \n')" = \
+RUN install -o root -g root -m 0755 /tmp/caddy /usr/bin/caddy \
+    && rm -f /tmp/caddy \
+    && test "$(od -An -tx1 -j18 -N2 /usr/local/bin/tailscale | tr -d ' \n')" = \
       "${TAILSCALE_ELF_MACHINE_HEX}" \
     && test "$(od -An -tx1 -j18 -N2 /usr/local/bin/tailscaled | tr -d ' \n')" = \
       "${TAILSCALE_ELF_MACHINE_HEX}"
@@ -155,6 +178,7 @@ COPY run-codex.sh /usr/local/sbin/run-codex-desktop
 COPY run-chrome.sh /usr/local/sbin/run-codex-chrome
 COPY run-x11vnc.sh /usr/local/sbin/run-codex-x11vnc
 COPY run-novnc.sh /usr/local/sbin/run-codex-novnc
+COPY lib/remote-browser/ /opt/codex-desktop/remote-browser/
 COPY codex-autostart.desktop /opt/codex-desktop-home-skel/.config/autostart/codex.desktop
 COPY chrome-autostart.desktop /etc/xdg/autostart/codex-chrome.desktop
 
@@ -172,6 +196,13 @@ RUN chmod 0755 \
       /usr/local/sbin/run-codex-chrome \
       /usr/local/sbin/run-codex-x11vnc \
       /usr/local/sbin/run-codex-novnc \
+      /opt/codex-desktop/remote-browser/run-playwright-mcp.sh \
+      /opt/codex-desktop/remote-browser/run-gateway.sh \
+      /opt/codex-desktop/remote-browser/prepare-credentials.sh \
+      /opt/codex-desktop/remote-browser/remote-browser-credentials \
+      /opt/codex-desktop/remote-browser/remote-browser-extension-token \
+      /opt/codex-desktop/remote-browser/guest-access-broker.py \
+      /opt/codex-desktop/remote-browser/guest-session-proxy.cjs \
       /etc/chrome-remote-desktop-session \
     && chmod 0644 /etc/pam.d/chrome-remote-desktop \
     && chmod 0644 \
@@ -184,6 +215,7 @@ RUN chmod 0755 \
       /home/codex/.local/share \
       /home/codex/Projects \
       /home/codex/.vnc \
+      /home/codex/.config/remote-browser \
     && install -d -m 0755 \
       /run/dbus \
       /run/tailscale \
@@ -208,6 +240,29 @@ RUN chmod 0755 \
         /etc/chrome-remote-desktop-session; \
     fi \
     && ln -sf /usr/share/novnc/vnc.html /usr/share/novnc/index.html \
+    && sed -i \
+      "s|UI.initSetting('path', 'websockify');|UI.initSetting('path', 'login/websockify');|" \
+      /usr/share/novnc/app/ui.js \
+    && grep -Fq \
+      "UI.initSetting('path', 'login/websockify');" \
+      /usr/share/novnc/app/ui.js \
+    && ln -s /opt/codex-desktop/remote-browser/remote-browser-credentials \
+      /usr/local/bin/remote-browser-credentials \
+    && ln -s /opt/codex-desktop/remote-browser/remote-browser-extension-token \
+      /usr/local/bin/remote-browser-extension-token \
+    && install -d -o root -g root -m 0755 /usr/local/libexec \
+    && ln -s /opt/codex-desktop/remote-browser/guest-access-broker.py \
+      /usr/local/libexec/remote-browser-guest-access \
+    && ln -s /opt/codex-desktop/remote-browser/guest-session-proxy.cjs \
+      /usr/local/libexec/remote-browser-guest-session \
+    && python3 -m py_compile \
+      /opt/codex-desktop/remote-browser/guest-access-broker.py \
+    && node --check \
+      /opt/codex-desktop/remote-browser/guest-session-proxy.cjs \
+    && test "$(node --print 'process.arch')" = \
+      "$(case "${DESKTOP_ARCH}" in amd64) echo x64 ;; arm64) echo arm64 ;; *) exit 64 ;; esac)" \
+    && test "$(playwright-mcp --version)" = "Version ${PLAYWRIGHT_MCP_VERSION}" \
+    && node /opt/codex-desktop/remote-browser/verify-upstream-playwright-lifecycle.cjs \
     && rm -f /etc/supervisor/conf.d/supervisord.conf
 
 ARG VCS_REF=""

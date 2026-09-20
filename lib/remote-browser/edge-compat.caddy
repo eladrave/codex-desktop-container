@@ -1,0 +1,61 @@
+# CodexGUI central-edge compatibility. These listeners are intentionally
+# unauthenticated because the central edge Caddy owns bearer/token-path MCP
+# authentication and noVNC token-cookie/Basic authentication. They are enabled
+# only by compose.codexgui.yaml and must never be published as host ports.
+http://:8931 {
+	bind 0.0.0.0
+
+	log {
+		output discard
+	}
+	header {
+		-Server
+		Cache-Control "no-store"
+		Referrer-Policy "no-referrer"
+	}
+
+	handle /healthz {
+		respond "ready" 200
+	}
+
+	@mcp_unsupported {
+		path /mcp
+		not method POST DELETE
+	}
+	handle @mcp_unsupported {
+		respond 405
+	}
+
+	@mcp {
+		path /mcp
+		method POST DELETE
+	}
+	handle @mcp {
+		reverse_proxy 127.0.0.2:8932 {
+			header_up Host 127.0.0.2:8932
+			flush_interval -1
+		}
+	}
+
+	handle {
+		respond 404
+	}
+}
+
+http://:6080 {
+	bind 0.0.0.0
+
+	log {
+		output discard
+	}
+	header {
+		-Server
+		Cache-Control "no-store"
+		Referrer-Policy "no-referrer"
+	}
+
+	reverse_proxy 127.0.0.2:6081 {
+		header_up Connection {http.request.header.Connection}
+		header_up Upgrade {http.request.header.Upgrade}
+	}
+}

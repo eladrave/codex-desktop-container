@@ -14,6 +14,18 @@ test -x /usr/bin/xdg-mime
 test -x /usr/bin/websockify
 test -x /usr/bin/x11vnc
 test -x /usr/bin/Xvfb
+test -x /usr/local/bin/node
+test -x /usr/local/bin/playwright-mcp
+test -x /usr/bin/caddy
+test -x /usr/bin/python3
+test "$(id -u remote-guest)" = 10002
+test "$(playwright-mcp --version)" = "Version ${PLAYWRIGHT_MCP_VERSION}"
+case "${CODEX_DESKTOP_IMAGE_ARCH}" in
+  amd64) expected_node_arch=x64 ;;
+  arm64) expected_node_arch=arm64 ;;
+  *) exit 1 ;;
+esac
+test "$(node --print 'process.arch')" = "${expected_node_arch}"
 case "${CODEX_DESKTOP_CRD_ENABLED}" in
   1)
     test "$(dpkg-query -W -f='${Version}' chrome-remote-desktop)" = \
@@ -69,15 +81,18 @@ chrome_main_running() {
   return 1
 }
 
-tailscale_ip="$(
-  /usr/local/bin/tailscale --socket=/run/tailscale/tailscaled.sock \
-    ip -4 2>/dev/null | head -n 1 || true
-)"
-if [[ -n "${tailscale_ip}" ]]; then
-  supervisorctl status novnc | grep -Eq '^[^[:space:]]+[[:space:]]+RUNNING([[:space:]]|$)'
-  curl --fail --silent --show-error --max-time 5 \
-    "http://127.0.0.1:6080/vnc.html" | grep -qi noVNC
-fi
+supervisorctl status remote-browser-gateway | \
+  grep -Eq '^[^[:space:]]+[[:space:]]+RUNNING([[:space:]]|$)'
+supervisorctl status remote-browser-guest-access | \
+  grep -Eq '^[^[:space:]]+[[:space:]]+RUNNING([[:space:]]|$)'
+supervisorctl status playwright-mcp | \
+  grep -Eq '^[^[:space:]]+[[:space:]]+RUNNING([[:space:]]|$)'
+supervisorctl status novnc | \
+  grep -Eq '^[^[:space:]]+[[:space:]]+RUNNING([[:space:]]|$)'
+curl --fail --silent --show-error --max-time 5 \
+  "http://127.0.0.2:6081/" | grep -qi noVNC
+curl --fail --silent --show-error --max-time 5 \
+  "http://127.0.0.1:8443/healthz" | grep -qx ready
 
 supervisorctl status desktop-session | \
   grep -Eq '^[^[:space:]]+[[:space:]]+RUNNING([[:space:]]|$)'
@@ -106,19 +121,66 @@ if ((desktop_ready == 1)); then
   pgrep -u 10001 -f '/usr/lib/chatgpt/ChatGPT' >/dev/null
   setpriv --reuid=10001 --regid=10001 --init-groups \
     test -w /home/codex/.config/google-chrome
-  if [[ -s /home/codex/.vnc/passwd ]]; then
-    [[ -f /home/codex/.vnc/passwd && ! -L /home/codex/.vnc/passwd ]]
-    [[ "$(stat -c '%u:%g:%a' /home/codex/.vnc/passwd)" == \
-      '10001:10001:600' ]]
-    supervisorctl status x11vnc | grep -Eq '^[^[:space:]]+[[:space:]]+RUNNING([[:space:]]|$)'
-    pgrep -u 10001 -x x11vnc >/dev/null
-    x11vnc_command="$(pgrep -u 10001 -x x11vnc | head -n 1)"
-    x11vnc_command="$(tr '\0' ' ' <"/proc/${x11vnc_command}/cmdline")"
-    [[ "${x11vnc_command}" == *"-display ${display}"* ]]
-    [[ "${x11vnc_command}" == *"-auth ${xauthority}"* ]]
-    exec 3<>/dev/tcp/127.0.0.2/5900
-    IFS= read -r -t 2 rfb_banner <&3
-    exec 3>&-
-    [[ "${rfb_banner}" == RFB* ]]
+  supervisorctl status x11vnc | \
+    grep -Eq '^[^[:space:]]+[[:space:]]+RUNNING([[:space:]]|$)'
+  pgrep -u 10001 -x x11vnc >/dev/null
+  x11vnc_command="$(pgrep -u 10001 -x x11vnc | head -n 1)"
+  x11vnc_command="$(tr '\0' ' ' <"/proc/${x11vnc_command}/cmdline")"
+  [[ "${x11vnc_command}" == *"-display ${display}"* ]]
+  [[ "${x11vnc_command}" == *"-auth ${xauthority}"* ]]
+  [[ "${x11vnc_command}" == *' -nopw '* ]]
+  [[ "${x11vnc_command}" == *' -noipv6 '* ]]
+  exec 3<>/dev/tcp/127.0.0.2/5900
+  IFS= read -r -t 2 rfb_banner <&3
+  exec 3>&-
+  [[ "${rfb_banner}" == RFB* ]]
+fi
+
+listeners="$(ss -H -lnt)"
+grep -Eq '127[.]0[.]0[.]2:5900[[:space:]]' <<<"${listeners}"
+grep -Eq '127[.]0[.]0[.]2:6081[[:space:]]' <<<"${listeners}"
+grep -Eq '127[.]0[.]0[.]1:8443[[:space:]]' <<<"${listeners}"
+if grep -Eq '(^|[[:space:]])(0[.]0[.]0[.]0|\[::\]|:::|\*):(5900|6081|8443|8444|9222)([[:space:]]|$)' \
+  <<<"${listeners}"; then
+  echo 'Remote browser service is listening on an unrestricted address.' >&2
+  exit 1
+fi
+
+guest_socket=/run/remote-browser/guest-control.sock
+guest_status=/run/remote-browser/guest-status.json
+[[ -S "${guest_socket}" && ! -L "${guest_socket}" ]]
+[[ "$(stat -c '%u:%g:%a' "${guest_socket}")" == '0:10001:660' ]]
+[[ -f "${guest_status}" && ! -L "${guest_status}" ]]
+[[ "$(stat -c '%u:%g:%a' "${guest_status}")" == '0:10001:440' ]]
+guest_state="$(jq -er '.state | select(. == "CLOSED" or . == "STARTING" or . == "ISSUED" or . == "REDEEMED" or . == "CLOSING" or . == "BLOCKED")' "${guest_status}")"
+if [[ "${guest_state}" == ISSUED || "${guest_state}" == REDEEMED ]]; then
+  grep -Eq '127[.]0[.]0[.]1:8444[[:space:]]' <<<"${listeners}"
+elif grep -Eq '[[:space:]]127[.]0[.]0[.]1:8444[[:space:]]' <<<"${listeners}"; then
+  echo 'Guest proxy listener remained active without an issued session.' >&2
+  exit 1
+fi
+
+edge_compat="${REMOTE_BROWSER_EDGE_COMPAT:-0}"
+if [[ "${edge_compat}" == 1 ]]; then
+  grep -Eq '(^|[[:space:]])(0[.]0[.]0[.]0|\*):6080[[:space:]]' \
+    <<<"${listeners}"
+  grep -Eq '(^|[[:space:]])(0[.]0[.]0[.]0|\*):8931[[:space:]]' \
+    <<<"${listeners}"
+else
+  if grep -Eq '(^|[[:space:]])(0[.]0[.]0[.]0|\[::\]|:::|\*):(6080|8931)([[:space:]]|$)' \
+    <<<"${listeners}"; then
+    echo 'CodexGUI compatibility listener is active outside edge mode.' >&2
+    exit 1
   fi
+fi
+if grep -Eq '(^|:|\])9222([[:space:]]|$)' <<<"${listeners}"; then
+  echo 'A forbidden Chrome debugging listener is active on port 9222.' >&2
+  exit 1
+fi
+
+extension_token=/home/codex/.config/remote-browser/extension-token
+if [[ -e "${extension_token}" ]]; then
+  [[ -f "${extension_token}" && ! -L "${extension_token}" ]]
+  [[ "$(stat -c '%u:%g:%a' "${extension_token}")" == '10001:10001:600' ]]
+  grep -Eq '127[.]0[.]0[.]2:8932[[:space:]]' <<<"${listeners}"
 fi

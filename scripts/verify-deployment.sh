@@ -5,6 +5,9 @@ container_name=codex-desktop-desktop-1
 config_file=/etc/codex-desktop/deploy.env
 compose_file=/opt/services/codex-desktop/compose.yaml
 allow_incomplete=0
+credentials_dir=/var/lib/codex-desktop-persistent/remote-browser
+credentials_file=${credentials_dir}/credentials.env
+extension_token_file=/home/codex/.config/remote-browser/extension-token
 
 usage() {
   echo 'Usage: sudo verify-deployment.sh [--allow-incomplete]'
@@ -43,6 +46,71 @@ docker exec "${container_name}" /usr/local/sbin/codex-desktop-healthcheck
 docker exec "${container_name}" supervisorctl status
 docker exec "${container_name}" dpkg-query -W \
   chatgpt chrome-remote-desktop google-chrome-stable novnc websockify x11vnc
+[[ "$(docker exec "${container_name}" dpkg --print-architecture)" == amd64 ]]
+[[ "$(docker exec "${container_name}" node -p process.arch)" == x64 ]]
+[[ "$(docker exec "${container_name}" playwright-mcp --version)" == \
+  'Version 0.0.82' ]]
+for native_binary in /usr/local/bin/node /usr/bin/caddy; do
+  [[ "$(docker exec "${container_name}" sh -c \
+    "od -An -tx1 -j18 -N2 '${native_binary}' | tr -d ' \\n'")" == 3e00 ]]
+done
+[[ "$(docker compose --project-name codex-desktop \
+  --env-file "${config_file}" -f "${compose_file}" ps -q | wc -l | tr -d ' ')" == 1 ]]
+
+docker exec "${container_name}" test -d "${credentials_dir}"
+[[ "$(docker exec "${container_name}" stat -c '%u:%g:%a' "${credentials_dir}")" == \
+  '0:0:700' ]]
+docker exec "${container_name}" test -f "${credentials_file}"
+[[ "$(docker exec "${container_name}" stat -c '%u:%g:%a' "${credentials_file}")" == \
+  '0:0:600' ]]
+docker exec "${container_name}" test -x /usr/local/bin/remote-browser-credentials
+docker exec "${container_name}" test -x /usr/local/bin/remote-browser-extension-token
+docker exec "${container_name}" supervisorctl status remote-browser-gateway | \
+  grep -Eq '^[^[:space:]]+[[:space:]]+RUNNING([[:space:]]|$)'
+docker exec "${container_name}" supervisorctl status remote-browser-guest-access | \
+  grep -Eq '^[^[:space:]]+[[:space:]]+RUNNING([[:space:]]|$)'
+[[ "$(docker exec "${container_name}" stat -c '%u:%g:%a' \
+  /run/remote-browser/guest-control.sock)" == '0:10001:660' ]]
+[[ "$(docker exec "${container_name}" stat -c '%u:%g:%a' \
+  /run/remote-browser/guest-status.json)" == '0:10001:440' ]]
+
+listeners="$(docker exec "${container_name}" ss -lntH)"
+for expected_listener in \
+  '127.0.0.1:8443' \
+  '127.0.0.2:5900' \
+  '127.0.0.2:6081'; do
+  grep -Eq "[[:space:]]${expected_listener//./\\.}[[:space:]]" <<<"${listeners}"
+done
+if awk '$4 ~ /:9222$/ { found=1 } END { exit !found }' <<<"${listeners}"; then
+  echo 'A process is listening on forbidden Chrome debugging port 9222.' >&2
+  exit 1
+fi
+if grep -Eq '(^|[[:space:]])(0\.0\.0\.0|\*|\[::\]|:::):(5900|6081|8932|8443|8444)([[:space:]]|$)' \
+  <<<"${listeners}"; then
+  echo 'A remote-browser service is listening on a wildcard address.' >&2
+  exit 1
+fi
+if grep -Eq '(^|[[:space:]])\[[^]]+\]:(5900|6081|8932|8443|8444)([[:space:]]|$)' \
+  <<<"${listeners}"; then
+  echo 'A remote-browser service is listening on IPv6.' >&2
+  exit 1
+fi
+if docker exec "${container_name}" pgrep -af 'chrome|chromium' | \
+  grep -Eq -- '--remote-debugging-port(=|[[:space:]])'; then
+  echo 'Chrome was started with a forbidden remote debugging port.' >&2
+  exit 1
+fi
+
+[[ "$(docker exec "${container_name}" curl -sS -o /dev/null -w '%{http_code}' \
+  http://127.0.0.1:8443/healthz)" == 200 ]]
+[[ "$(docker exec "${container_name}" curl -sS -o /dev/null -w '%{http_code}' \
+  -X POST http://127.0.0.1:8443/mcp)" == 401 ]]
+[[ "$(docker exec "${container_name}" curl -sS -o /dev/null -w '%{http_code}' \
+  http://127.0.0.1:8443/mcp)" == 405 ]]
+[[ "$(docker exec "${container_name}" curl -sS -o /dev/null -w '%{http_code}' \
+  http://127.0.0.1:8443/login/)" == 401 ]]
+docker exec "${container_name}" tailscale serve status --json | \
+  grep -Fq '127.0.0.1:8443'
 
 tailscale_summary="$(
   docker exec "${container_name}" tailscale status --json |
@@ -69,43 +137,31 @@ if [[ "${crd_status}" != STARTED && "${allow_incomplete}" == 0 ]]; then
   exit 1
 fi
 
-novnc_configured=0
-if [[ -s /var/lib/codex-desktop/home/.vnc/passwd ]]; then
-  [[ "$(stat -c '%u:%g:%a' /var/lib/codex-desktop/home/.vnc/passwd)" == \
-    '10001:10001:600' ]]
-  printf 'noVNC password: configured\n'
-  novnc_configured=1
+extension_configured=0
+if docker exec "${container_name}" test -s "${extension_token_file}"; then
+  [[ "$(docker exec "${container_name}" stat -c '%u:%g:%a' \
+    "${extension_token_file}")" == '10001:10001:600' ]]
+  docker exec "${container_name}" supervisorctl status playwright-mcp | \
+    grep -Eq '^[^[:space:]]+[[:space:]]+RUNNING([[:space:]]|$)'
+  grep -Eq '[[:space:]]127\.0\.0\.2:8932[[:space:]]' <<<"${listeners}"
+  extension_configured=1
+  printf 'Playwright MCP extension token: configured\n'
 else
-  printf 'noVNC password: not configured\n'
+  docker exec "${container_name}" supervisorctl status playwright-mcp | \
+    grep -Eq '^[^[:space:]]+[[:space:]]+RUNNING([[:space:]]|$)'
+  if awk '$4 ~ /:8932$/ { found=1 } END { exit !found }' <<<"${listeners}"; then
+    echo 'MCP backend is listening before its extension token is configured.' >&2
+    exit 1
+  fi
+  printf 'Playwright MCP extension token: not configured\n'
 fi
-if [[ "${novnc_configured}" == 0 && "${allow_incomplete}" == 0 ]]; then
-  echo 'noVNC password is not configured.' >&2
+if [[ "${extension_configured}" == 0 && "${allow_incomplete}" == 0 ]]; then
+  echo 'Playwright MCP extension token is not configured.' >&2
   exit 1
 fi
 
-if [[ "${crd_status}" == STARTED && "${novnc_configured}" == 1 ]]; then
-  tailscale_ip="$(jq -r '.Self.TailscaleIPs[0] // empty' <<<"${tailscale_summary}")"
-  [[ "${tailscale_ip}" =~ ^100\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]
-  listeners="$(docker exec "${container_name}" ss -lnt)"
-  grep -Eq "127\\.0\\.0\\.2:5900[[:space:]]" <<<"${listeners}"
-  grep -Eq "127\\.0\\.0\\.1:6080[[:space:]]" <<<"${listeners}"
-  if grep -Eq '(0\.0\.0\.0|:::):(5900|6080)[[:space:]]' <<<"${listeners}"; then
-    echo 'VNC or noVNC is listening on an unrestricted container address.' >&2
-    exit 1
-  fi
-
-  tailscale_dns="$(jq -r '.Self.DNSName // empty' <<<"${tailscale_summary}")"
-  if [[ -n "${tailscale_dns}" ]]; then
-    printf 'noVNC: http://%s:6080/vnc.html?autoconnect=1&resize=scale\n' \
-      "${tailscale_dns%.}"
-  else
-    printf 'noVNC: http://%s:6080/vnc.html?autoconnect=1&resize=scale\n' \
-      "${tailscale_ip}"
-  fi
-fi
-
 if [[ "${allow_incomplete}" == 1 && \
-  ("${crd_status}" != STARTED || "${novnc_configured}" == 0) ]]; then
+  ("${crd_status}" != STARTED || "${extension_configured}" == 0) ]]; then
   printf 'Base deployment checks passed; user-only setup remains incomplete.\n'
 else
   printf 'Codex Desktop deployment verification passed.\n'

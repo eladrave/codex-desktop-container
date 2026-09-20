@@ -1,0 +1,106 @@
+{
+	admin off
+	auto_https off
+	log default {
+		output discard
+	}
+}
+
+http://:8443 {
+	bind 127.0.0.1
+
+	# Requests can contain bearer tokens, tokenized compatibility paths, login
+	# tokens, and cookies. Never write request metadata to an access log.
+	log {
+		output discard
+	}
+
+	header {
+		-Server
+		Cache-Control "no-store"
+		Referrer-Policy "no-referrer"
+	}
+
+	handle /healthz {
+		respond "ready" 200
+	}
+
+	@mcp_unsupported {
+		path /mcp /{$REMOTE_BROWSER_MCP_TOKEN}/mcp
+		not method POST DELETE
+	}
+	handle @mcp_unsupported {
+		respond 405
+	}
+
+	@mcp_bearer {
+		path /mcp
+		method POST DELETE
+		header Authorization "Bearer {$REMOTE_BROWSER_MCP_TOKEN}"
+	}
+	handle @mcp_bearer {
+		reverse_proxy 127.0.0.2:8932 {
+			header_up Host 127.0.0.2:8932
+			flush_interval -1
+		}
+	}
+
+	@mcp_unauthorized {
+		path /mcp
+		method POST DELETE
+	}
+	handle @mcp_unauthorized {
+		respond 401
+	}
+
+	@mcp_token_path {
+		path /{$REMOTE_BROWSER_MCP_TOKEN}/mcp
+		method POST DELETE
+	}
+	handle @mcp_token_path {
+		rewrite * /mcp
+		reverse_proxy 127.0.0.2:8932 {
+			header_up Host 127.0.0.2:8932
+			flush_interval -1
+		}
+	}
+
+	@login_token_query {
+		path /login/
+		query token={$REMOTE_BROWSER_LOGIN_TOKEN}
+	}
+	handle @login_token_query {
+		header Set-Cookie "remote_chrome_login={$REMOTE_BROWSER_LOGIN_TOKEN}; Path=/login/; Max-Age=28800; HttpOnly; Secure; SameSite=Strict"
+		redir * "/login/?autoconnect=1&resize=scale" 303
+	}
+
+	@login_token_cookie {
+		path /login/*
+		header_regexp loginCookie Cookie "(^|;[ ]*)remote_chrome_login={$REMOTE_BROWSER_LOGIN_TOKEN}($|;)"
+	}
+	handle @login_token_cookie {
+		uri strip_prefix /login
+		reverse_proxy 127.0.0.2:6081 {
+			header_up Connection {http.request.header.Connection}
+			header_up Upgrade {http.request.header.Upgrade}
+		}
+	}
+
+	handle_path /login/* {
+		basic_auth {
+			{$REMOTE_BROWSER_LOGIN_USERNAME} {$REMOTE_BROWSER_LOGIN_PASSWORD_HASH}
+		}
+		reverse_proxy 127.0.0.2:6081 {
+			header_up Connection {http.request.header.Connection}
+			header_up Upgrade {http.request.header.Upgrade}
+		}
+	}
+
+	handle {
+		respond 404
+	}
+}
+
+# Empty in the default Tailscale deployment. In explicit CodexGUI edge mode,
+# the gateway wrapper installs the private-network compatibility listeners.
+import /run/remote-browser/edge-compat.caddy

@@ -3,11 +3,30 @@
 [![CI](https://github.com/eladrave/codex-desktop-container/actions/workflows/ci.yml/badge.svg)](https://github.com/eladrave/codex-desktop-container/actions/workflows/ci.yml)
 
 A persistent Linux desktop container for the official Codex desktop app, with
-Xfce, an always-on Google Chrome, Tailscale, Tailscale SSH, and noVNC. Ubuntu
-AMD64 also includes Chrome Remote Desktop. Apple silicon uses a fully native
-ARM64 image and noVNC as its graphical access path. Codex and Chrome run as the
-same unprivileged desktop user so the official browser extension can connect
-them.
+Xfce, an always-on Google Chrome, Tailscale, Tailscale SSH, authenticated noVNC,
+and a remote Playwright MCP server. Ubuntu AMD64 also includes Chrome Remote
+Desktop. Apple silicon uses a fully native ARM64 image and noVNC as its
+graphical access path. Codex, Playwright MCP, and noVNC all use the same visible
+Chrome profile and desktop session.
+
+This is a single-container, in-place replacement for `remotechromemcp`. It
+preserves bearer-authenticated MCP, optional token-path compatibility, the
+browser-operation playbook, human-handoff tools, a one-click noVNC URL, and
+Basic Auth fallback. It uses stock pinned Playwright MCP in extension mode and
+does not open Chrome's debugging port.
+
+The MCP handoff tools return the stable, bookmarkable tailnet noVNC link. When
+the user explicitly cannot use Tailscale, a separate tool can create a
+single-use public guest link with a fixed 30-minute maximum lifetime. That
+temporary Funnel exposes only a dedicated noVNC proxy on HTTPS 8443; it never
+publishes MCP or the permanent gateway and can be revoked immediately.
+
+The default is Tailscale-only. An explicit `compose.codexgui.yaml` override
+implements the existing central-edge replacement contract while keeping the
+default deployment detached from codexgui's `edge` network. Applying that
+override is a separate production operation and requires an explicit decision.
+It reuses the existing remote browser profile and public credentials in place
+so existing MCP and noVNC clients do not need new connection details.
 
 The image uses the official unified Linux package named `chatgpt`; the desktop
 application it launches is Codex. Package versions, download URLs, base images,
@@ -17,6 +36,7 @@ and checksums are pinned in the `Dockerfile` for reproducible builds.
 
 - [Complete installation and upgrade guide](docs/installation.md)
 - [Tailscale enrollment, access, and in-container usage](docs/tailscale.md)
+- [Remote browser MCP, credentials, and noVNC gateway](docs/remote-browser-mcp.md)
 - [Agent deployment question and execution playbook](docs/agent-deployment.md)
 - [Security boundaries](SECURITY.md)
 
@@ -34,9 +54,9 @@ prerequisites, clones one exact repository revision, and invokes the same
 `./scripts/install.sh` entry point on both platforms. The installer then builds
 the pinned native image for the detected host, asks all non-secret
 configuration questions, enrolls
-Tailscale through a hidden auth-key prompt or browser URL, optionally configures
-noVNC, starts the container, and prints the remaining platform-specific Codex
-steps.
+Tailscale through a hidden auth-key prompt or browser URL, configures the
+authenticated HTTPS gateway, starts the container, and prints the remaining
+platform-specific Codex and Playwright-extension steps.
 
 For review-before-execution, download and inspect the bootstrap first:
 
@@ -65,9 +85,9 @@ recreation in these host directories:
 
 | Host path | Container path | Contents |
 | --- | --- | --- |
-| `/var/lib/codex-desktop/home` | `/home/codex` | Codex login and settings, Ubuntu CRD registration, Xfce settings, projects, and the Chrome profile under `.config/google-chrome` |
+| `/var/lib/codex-desktop/home` | `/home/codex` | Codex login and settings, Ubuntu CRD registration, Xfce settings, projects, Chrome profile, extensions, and Playwright extension token |
 | `/var/lib/codex-desktop/tailscale` | `/var/lib/tailscale` | Tailscale node identity and preferences |
-| `/var/lib/codex-desktop/machine` | `/var/lib/codex-desktop-persistent` | Stable DBus machine identity |
+| `/var/lib/codex-desktop/machine` | `/var/lib/codex-desktop-persistent` | Stable DBus machine identity and root-only remote-browser gateway credentials |
 
 Those host paths apply to Ubuntu. The Apple silicon Compose override uses the
 named volumes `codex-desktop-home`, `codex-desktop-tailscale`, and
@@ -78,19 +98,21 @@ establish outbound connections. No Docker socket is mounted, and no existing
 Codex profile is copied into the image.
 
 Tailscale runs entirely in userspace, so the container needs no TUN device or
-network-administration capabilities. The noVNC web service and its private
-x11vnc backend bind only to container loopback on TCP 6080 and 5900. Tailscale's
-userspace netstack forwards tailnet TCP 6080 to `127.0.0.1:6080`. The raw VNC
-backend uses `127.0.0.2:5900`, rather than the netstack's same-port localhost
-target. Neither port is published by Docker.
+network-administration capabilities. Tailscale Serve terminates tailnet HTTPS
+on TCP 443 and forwards only to the authenticated gateway on
+`127.0.0.1:8443`. MCP, noVNC, and x11vnc bind to the private loopback alias
+`127.0.0.2`; none is published by Docker or directly reachable through the
+userspace netstack's same-port forwarding.
 
 Codex and Chrome are started by Xfce, share the managed display and session bus,
 and use single-instance restart wrappers for unattended work.
 The container registers Chrome as the default HTTP/HTTPS browser and Codex as
 the `codex:` callback handler so ChatGPT sign-in can complete inside the same
 persistent desktop session.
-Browser control uses the official ChatGPT browser extension and Codex's
-approval model; this image does not open a raw Chrome debugging port.
+Browser control supports both the official ChatGPT browser extension with
+Codex's approval model and stock Playwright MCP `--extension` mode. Both attach
+to the same persistent visible Chrome. This image does not pass
+`--remote-debugging-port` to Chrome and nothing listens on TCP 9222.
 
 ## Requirements
 
@@ -98,7 +120,7 @@ approval model; this image does not open a raw Chrome debugging port.
 - Docker Engine with Compose on Linux, or Docker Desktop on macOS
 - AppArmor tools on an AppArmor-enabled Linux host
 - A Tailscale account and policy that permits Tailscale SSH
-- A tailnet ACL permitting intended viewers to reach this node on TCP 6080
+- A tailnet ACL permitting intended clients to reach this node on TCP 443
 - On Ubuntu only, a Google account authorized for Chrome Remote Desktop
 - At least 8 GiB of host RAM is recommended for Codex, Chrome, and the desktop
   session together
@@ -122,7 +144,7 @@ cd codex-desktop-container
 revision="$(git rev-parse HEAD)"
 docker buildx build --platform linux/amd64 --load \
   --build-arg "VCS_REF=${revision}" \
-  --tag codex-desktop:chatgpt-26.820.60940-crd-152.0.7977.9-ts1.102.2-10 \
+  --tag codex-desktop:chatgpt-26.820.60940-crd-154.0.8037.11-ts1.102.4-11 \
   .
 ```
 
@@ -143,11 +165,12 @@ path and installs a systemd service. When run directly on Ubuntu, invoke it as
 `sudo ./scripts/install.sh`. On Apple silicon, run it as the normal user; it
 uses Docker Desktop, named volumes, and a user launch agent.
 
-The installer asks for the host configuration, Tailscale enrollment method,
-and optional noVNC setup. A one-time Tailscale auth key is accepted only through
-a hidden terminal prompt and is removed from container tmpfs immediately after
-use. The alternative browser flow prints a login URL for the user to open and
-approve in the intended account and tailnet.
+The installer asks for the host configuration and Tailscale enrollment method.
+A one-time Tailscale auth key is accepted only through a hidden terminal prompt
+and is removed from container tmpfs immediately after use. The alternative
+browser flow prints a login URL for the user to open and approve in the intended
+account and tailnet. Gateway credentials are generated silently in persistent
+root-only state and are never added to `deploy.env`.
 
 The installer does not install Docker, publish LAN/public ports, or automate
 Google, Codex, Chrome-extension, or PIN entry. It prints the ordered user-only
@@ -240,34 +263,24 @@ the exact command produced by the Google wizard, and tolerates the expected
 systemd error from CRD's upstream helper. Supervisor starts the registered host
 automatically after its persistent configuration appears.
 
-## Configure noVNC
+## Open authenticated noVNC
 
 noVNC displays the persistent Xfce session. It is the primary graphical path on
-Apple silicon and an alternative to Chrome Remote Desktop on Ubuntu. After
-Tailscale is configured, create the persistent VNC password from a trusted
-interactive shell:
+Apple silicon and an alternative to Chrome Remote Desktop on Ubuntu. The
+installer creates independent one-click and Basic Auth credentials and stores
+them in persistent root-only state. Retrieve the connection details only in a
+trusted interactive root shell:
 
 ```bash
-sudo docker exec -it codex-desktop-desktop-1 \
-  /usr/local/bin/configure-codex-novnc
+remote-browser-credentials
 ```
 
-Enter and verify a dedicated password when x11vnc prompts. The password file is
-stored at `/home/codex/.vnc/passwd` inside the persistent home mount. Do not use
-a website, Google, Codex, or system-login password. The classic VNC protocol
-uses only the first eight password characters, so use a unique random password
-and treat the tailnet identity plus restrictive ACL as the primary boundary.
-
-From an authenticated device on the permitted tailnet, open:
-
-```text
-http://codex-desktop:6080/vnc.html?autoconnect=1&resize=scale
-```
-
-Replace `codex-desktop` with `TAILSCALE_HOSTNAME` when customized, then enter
-the VNC password. Tailscale encrypts this connection, while x11vnc provides the
-application-level password check. Do not expose this HTTP service through a
-public proxy or Docker port mapping.
+Use the displayed one-click HTTPS URL from an allowed tailnet device. The
+gateway exchanges its token for a secure cookie, removes the secret from the
+address bar, and opens the scaled noVNC session with auto-connect enabled.
+Basic Auth is the fallback. The raw noVNC and VNC ports are private container
+backends and must not be opened directly. See
+[Remote browser MCP](docs/remote-browser-mcp.md).
 
 ## Connect Codex to persistent Chrome
 
@@ -288,6 +301,17 @@ Install the extension in the Chrome window started by this container. Its
 profile is `/home/codex/.config/google-chrome`, so the extension, permissions,
 and signed-in site state survive container recreation. The matching Codex
 plugin and native-host state persist under `/home/codex`.
+
+For remote MCP, separately install the Playwright extension into this same
+Chrome profile. Obtain its token through the extension UI, then enter it only at
+the hidden prompt inside the container:
+
+```bash
+remote-browser-extension-token
+```
+
+This starts the independently supervised stock Playwright MCP service. It does
+not grant or bypass Codex `@Chrome` approvals.
 
 If a task needs console, network, DOM, or performance inspection, open
 **Settings > Browser** and enable **full CDP access**. Full CDP is elevated-risk
@@ -336,12 +360,14 @@ On Apple silicon:
 ~/.local/share/codex-desktop/source/scripts/verify-macos.sh
 ```
 
-Finally, connect through noVNC, or Chrome Remote Desktop on Ubuntu, and confirm
+Finally, connect through authenticated noVNC, or Chrome Remote Desktop on
+Ubuntu, and confirm
 that Xfce, Codex, and Chrome open. Confirm the extension reports connected in Codex, run one
 `@Chrome` action, restart the service, and repeat the action without reinstalling
-the extension or signing back into the test site. Open the noVNC URL before and
-after that restart and verify that it shows the same Chrome tabs and Xfce
-session.
+the extension or signing back into the test site. Initialize MCP through its
+bearer endpoint, list tools, take a harmless snapshot, and delete the session.
+Verify the browser action is visible in noVNC and survives a restart without
+rotating gateway credentials or reprovisioning either extension.
 
 ## Upgrades and rollback
 
@@ -352,9 +378,10 @@ Build every package update as a new immutable image tag. Change only
 sudo systemctl restart codex-desktop.service
 ```
 
-Verify the package versions, Tailscale identity, and a real desktop connection;
-also verify CRD status on Ubuntu. Roll back by restoring the prior `IMAGE_REF`
-and restarting the same service. Never remove persistent state during an
+Verify the package versions, Tailscale identity, Serve route, gateway and MCP
+processes, and a real desktop connection; also verify CRD status on Ubuntu.
+Roll back by restoring the prior `IMAGE_REF` and restarting the same service.
+Never remove persistent state or rotate gateway credentials during an ordinary
 upgrade or rollback.
 
 Back up the Chrome profile only while the service is stopped so Chrome has

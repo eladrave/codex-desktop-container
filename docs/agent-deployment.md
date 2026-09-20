@@ -18,7 +18,8 @@ host-specific runbook.
    macOS? For a remote Linux host, what approved SSH alias should the agent use?
 2. **Existing installation:** Is this a fresh install or an upgrade that must
    preserve the existing home, Tailscale identity, machine identity, browser
-   profile, noVNC password, and Ubuntu CRD registration when present?
+   profile, remote-browser credentials, Playwright extension token, and Ubuntu
+   CRD registration when present?
 3. **Container hostname:** What local container hostname should be used?
 4. **Tailscale hostname:** What stable MagicDNS/device hostname should be used?
 5. **Tailnet/account:** Which Tailscale account or tailnet should own the node?
@@ -34,8 +35,8 @@ host-specific runbook.
 10. **Resources:** Confirm memory limit, memory reservation, and CPU limit.
 11. **Image:** Confirm the immutable image tag and whether to build it on the
     target host or use a preloaded image.
-12. **noVNC:** Ask whether to configure its password during installation. The
-    password must be entered directly at the trusted terminal prompt.
+12. **Gateway:** Confirm the default Tailscale Serve HTTPS mode and the ACL that
+    permits intended clients to reach TCP 443. Do not request gateway secrets.
 13. **Ubuntu Chrome Remote Desktop:** On Ubuntu only, ask the user to choose the
     Google account in their own browser, generate the short-lived Linux command,
     paste it directly into the trusted Tailscale SSH session, and enter the PIN
@@ -43,7 +44,10 @@ host-specific runbook.
 14. **Codex and Chrome:** Ask the user to sign in to Codex, install the Chrome
     plugin and official extension, choose the required website permissions, and
     decide whether full CDP is truly necessary.
-15. **Acceptance:** Ask which harmless site and scheduled-task prompt should be
+15. **Playwright MCP:** Ask the user to install the Playwright extension in the
+    same persistent Chrome and enter its token only into the hidden
+    `remote-browser-extension-token` prompt.
+16. **Acceptance:** Ask which harmless site and scheduled-task prompt should be
     used for the final real browser test.
 
 The agent may group short non-secret configuration questions, but it must keep
@@ -64,6 +68,9 @@ Verify:
 - repository status and exact commit;
 - existing service, container, image, and persistent-state paths;
 - no unexpected published ports;
+- no Chrome `--remote-debugging-port` argument or listener on TCP 9222;
+- only the gateway on `127.0.0.1:8443`, with MCP, noVNC, and VNC backends on
+  their documented `127.0.0.2` addresses;
 - backup destination and free space.
 
 Do not inspect or print authentication files. Do not continue through an
@@ -122,8 +129,14 @@ or PIN into chat. Direct the user to:
 8. Configure full CDP only if required and accept that approval prompts may
    prevent fully unattended use.
 
-On Apple silicon, omit steps 1-4. Open the tailnet noVNC URL, enter the noVNC
-password, sign in to Codex, and continue with the Chrome integration steps.
+On Apple silicon, omit steps 1-4. Retrieve the one-click noVNC URL only in the
+trusted local container TTY, open it from the tailnet, sign in to Codex, and
+continue with the Chrome integration steps.
+
+For both platforms, direct the user to install the Playwright extension in the
+same Chrome profile and run `remote-browser-extension-token` in a trusted
+interactive root shell. They must paste the token only into that helper's hidden
+prompt. Never ask for the token in chat and never put it in a command argument.
 
 ## 5. Verify
 
@@ -139,20 +152,26 @@ On macOS use
 Then complete real workflow acceptance:
 
 - Tailscale SSH succeeds from an allowed device.
-- noVNC shows the Xfce session; on Ubuntu, CRD shows that same session.
+- authenticated noVNC shows the Xfce session; on Ubuntu, CRD shows that same
+  session.
 - Codex and Chrome are running as UID 10001.
 - Chrome reports connected in Codex.
 - One harmless `@Chrome` task succeeds.
-- Container recreation preserves Tailscale, Codex, extension, browser state,
-  noVNC configuration, and Ubuntu CRD registration when present.
+- Remote MCP initializes, lists tools, operates the same visible Chrome, and
+  explicitly deletes its test session.
+- Container recreation preserves Tailscale, Codex, both extensions, browser
+  state, gateway credentials, extension token, and Ubuntu CRD registration when
+  present.
 - One scheduled task runs with no viewer attached.
 - Docker still reports no published ports.
 
 ## 6. Report
 
 Report the target hostname, deployed commit, immutable image reference, service
-health, non-sensitive Tailscale identity summary, CRD/noVNC/Codex/Chrome test
-results, backup location, and any incomplete user-only step.
+health, non-sensitive Tailscale identity and Serve summary,
+CRD/noVNC/Codex/Chrome/MCP test results, backup location, and any incomplete
+user-only step.
 
-Never include auth keys, CRD codes, PINs, browser cookies, noVNC passwords,
-OAuth material, private profile contents, or Tailscale state in the report.
+Never include auth keys, CRD codes, PINs, browser cookies, gateway credentials,
+extension tokens, OAuth material, private profile contents, or Tailscale state
+in the report.

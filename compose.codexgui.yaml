@@ -1,0 +1,36 @@
+services:
+  desktop:
+    environment:
+      # The existing central edge owns public TLS and authentication. This
+      # mode adds only the private, in-network compatibility listeners.
+      REMOTE_BROWSER_EDGE_COMPAT: "1"
+      REMOTE_BROWSER_TAILSCALE_SERVE: "0"
+      REMOTE_BROWSER_GUEST_ACCESS_ENABLED: "0"
+      REMOTE_BROWSER_ORIGIN: ${REMOTE_BROWSER_ORIGIN:-https://chrome.eladrave.com}
+      REMOTE_BROWSER_EDGE_CREDENTIALS_FILE: /etc/remote-browser-edge/credentials.env
+    volumes:
+      # Reuse the production browser profile in place. UID/GID 10001 match the
+      # existing service, and no copy or credential rotation is performed.
+      - type: bind
+        source: ${REMOTE_BROWSER_PROFILE_PATH:-/var/lib/remote-chrome/profile}
+        target: /home/codex/.config/google-chrome
+      # Root-only legacy handoff data keeps the public noVNC URL stable. The
+      # unprivileged MCP process receives only the validated URL via a 0440
+      # runtime file, never this credential file.
+      - type: bind
+        source: ${REMOTE_BROWSER_EDGE_CREDENTIALS_PATH:-/etc/remote-chrome/credentials.env}
+        target: /etc/remote-browser-edge/credentials.env
+        read_only: true
+    expose:
+      - "6080"
+      - "8931"
+    networks:
+      default: {}
+      edge:
+        aliases:
+          - ${REMOTE_BROWSER_EDGE_ALIAS:-remote-chrome}
+
+networks:
+  edge:
+    external: true
+    name: ${EDGE_NETWORK_NAME:-edge}

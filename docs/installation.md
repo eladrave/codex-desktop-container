@@ -1,8 +1,9 @@
 # Installation
 
 This is a Tailscale-only deployment. It publishes no Docker host ports and
-does not add a LAN or public-IP access mode. Tailscale SSH, Chrome Remote
-Desktop, and tailnet-only noVNC are the supported access paths.
+does not add a LAN or public-IP access mode. Tailscale SSH, Tailscale Serve
+HTTPS, authenticated noVNC, remote Playwright MCP, and Chrome Remote Desktop on
+Ubuntu are the supported access paths.
 
 ## Requirements
 
@@ -73,11 +74,13 @@ The installer asks, in order, for:
 14. The one-time Tailscale auth key through a hidden prompt, or completion of
     the browser login URL flow.
 15. Confirmation that the resulting identity belongs to the intended tailnet.
-16. Whether to configure the persistent noVNC password.
+16. Confirmation that Tailscale Serve exposes only the authenticated HTTPS
+    gateway on TCP 443.
 
-It then prints the ordered user-only steps for Codex sign-in, the Chrome
-extension, and optional full CDP access. Ubuntu also prints the Chrome Remote
-Desktop registration steps.
+It then prints the ordered user-only steps for Codex sign-in, the official
+ChatGPT extension, Playwright extension token provisioning, remote MCP
+configuration, and optional Codex full CDP access. Ubuntu also prints the
+Chrome Remote Desktop registration steps.
 
 The installer:
 
@@ -92,7 +95,11 @@ The installer:
 - waits for Docker health;
 - preserves an existing working Tailscale identity;
 - performs a new Tailscale enrollment only when needed;
-- removes the temporary auth-key file immediately after enrollment.
+- removes the temporary auth-key file immediately after enrollment;
+- preserves or creates independent root-only gateway credentials in the
+  persistent machine-state volume;
+- configures Tailscale Serve HTTPS 443 to the authenticated gateway without
+  publishing a Docker port.
 
 On Ubuntu it installs the committed source under `/opt/services/codex-desktop`
 and manages `codex-desktop.service`. On Apple silicon it installs under
@@ -100,9 +107,10 @@ and manages `codex-desktop.service`. On Apple silicon it installs under
 persistent state stores, and installs a per-user launch agent that starts Docker
 Desktop and the Compose project at login.
 
-If noVNC or Ubuntu CRD setup is intentionally deferred, use the platform
-verifier with `--allow-incomplete` for base checks. The normal Ubuntu verifier
-requires both CRD and noVNC; the macOS verifier requires noVNC.
+If Playwright extension provisioning or Ubuntu CRD setup is intentionally
+deferred, use the platform verifier with `--allow-incomplete` for base checks.
+The normal verifier requires the Playwright extension token and running MCP;
+the normal Ubuntu verifier also requires CRD.
 
 ## Tailscale enrollment
 
@@ -114,7 +122,8 @@ The installer supports both enrollment methods below. See
 Generate the key from the intended tailnet. A key belongs to the account and
 tailnet that created it, which avoids ambiguity when you use multiple Tailscale
 accounts. Prefer a one-time, non-ephemeral key. Use a tag only when the tailnet
-policy intentionally grants that tag the required SSH and noVNC access, and use
+policy intentionally grants that tag the required SSH and HTTPS gateway access,
+and use
 pre-approval only when device approval is enabled.
 
 The installer reads the key from a hidden terminal prompt, sends it through
@@ -151,29 +160,24 @@ The command returns after approval. The resulting identity persists at
 `/var/lib/codex-desktop/tailscale` and is reused after container recreation and
 host reboot.
 
-## Configure noVNC
+## Open authenticated noVNC
 
-If skipped during installation, configure it later from a trusted host shell:
+The gateway creates independent one-click and Basic Auth credentials during
+first start. Retrieve them only from a trusted interactive root shell:
 
 ```bash
-sudo docker exec -it codex-desktop-desktop-1 \
-  /usr/local/bin/configure-codex-novnc
+remote-browser-credentials
 ```
 
-The password file persists at `/home/codex/.vnc/passwd`. Classic VNC uses only
-the first eight password characters, so use a unique random value and rely on
-tailnet identity and ACLs as the primary boundary.
+Use the displayed one-click HTTPS URL from an allowed tailnet device. The
+gateway exchanges the query token for a secure cookie and redirects to a clean
+`/login/` URL. Use the displayed Basic Auth credentials only as the fallback.
 
-After the desktop session is running, open from an allowed tailnet device:
-
-```text
-http://codex-desktop:6080/vnc.html?autoconnect=1&resize=scale
-```
-
-Replace `codex-desktop` with the configured Tailscale hostname. Tailscale's
-userspace netstack forwards tailnet TCP 6080 to noVNC on container loopback.
-Raw VNC uses the separate loopback address `127.0.0.2:5900`, outside the
-netstack's same-port localhost forwarding target.
+x11vnc and websockify are private backends at `127.0.0.2:5900` and
+`127.0.0.2:6081`. They have no direct tailnet or Docker route and must never be
+moved to `127.0.0.1`, a wildcard listener, or IPv6. A legacy
+`/home/codex/.vnc/passwd` may remain after an upgrade, but the unified gateway
+does not use it.
 
 ## Register Chrome Remote Desktop on Ubuntu
 
@@ -235,6 +239,29 @@ sign-in button open Chrome and return the completed login to the app.
 The Chrome profile persists under
 `/var/lib/codex-desktop/home/.config/google-chrome`.
 
+## Provision Playwright MCP
+
+The external MCP server uses stock pinned Playwright MCP in extension mode. It
+does not use Chrome's debugging port.
+
+1. In the same persistent Chrome, install the Playwright MCP extension.
+2. Obtain its connection token through the extension's trusted UI.
+3. In a trusted interactive root shell inside the container, run:
+
+   ```bash
+   remote-browser-extension-token
+   ```
+
+4. Paste the token only into the helper's hidden prompt.
+5. Confirm `supervisorctl status playwright-mcp` reports `RUNNING`.
+6. Run `remote-browser-credentials` locally in that TTY and configure the MCP
+   client with the displayed HTTPS URL and bearer token.
+
+Do not put either token in `deploy.env`, a command argument, chat, logs, or a
+saved shell command. Prefer bearer authentication. Use the token-path MCP URL
+only for clients that cannot set headers. See
+[Remote browser MCP](remote-browser-mcp.md) for routes and recovery.
+
 ## Verification
 
 Run on the host:
@@ -251,15 +278,18 @@ On Apple silicon, run:
 
 Then perform the interactive acceptance checks:
 
-1. Connect through noVNC. On Ubuntu, also connect through Chrome Remote Desktop
+1. Connect through authenticated noVNC. On Ubuntu, also connect through Chrome
+   Remote Desktop
    and confirm both show the same desktop and Chrome tabs.
 2. Run a real `@Chrome` action from Codex.
 3. Restart only `codex-desktop.service` on Ubuntu or the Compose project on
    macOS.
-4. Confirm Tailscale identity, Codex sign-in, Chrome extension,
-   cookies, and noVNC password all survive.
-5. On Ubuntu, confirm CRD registration also survives.
-6. Trigger one scheduled task without leaving a remote viewer attached.
+4. Initialize a remote MCP session, list tools, take a harmless snapshot, and
+   explicitly delete the session. Confirm the action is visible through noVNC.
+5. Confirm Tailscale identity and Serve route, Codex sign-in, both Chrome
+   extensions, cookies, gateway credentials, and extension token all survive.
+6. On Ubuntu, confirm CRD registration also survives.
+7. Trigger one scheduled task without leaving a remote viewer attached.
 
 ## Upgrade and rollback
 
