@@ -37,10 +37,12 @@ host-specific runbook.
     target host or use a preloaded image.
 12. **Gateway:** Confirm the default Tailscale Serve HTTPS mode and the ACL that
     permits intended clients to reach TCP 443. Do not request gateway secrets.
-13. **Ubuntu Chrome Remote Desktop:** On Ubuntu only, ask the user to choose the
-    Google account in their own browser, generate the short-lived Linux command,
-    paste it directly into the trusted Tailscale SSH session, and enter the PIN
-    at its hidden prompt. Apple silicon omits CRD and uses noVNC.
+13. **Ubuntu desktop access:** Ask whether to keep the default CRD-enabled mode
+    or use noVNC only. noVNC-only mode starts Xvfb/Xfce inside the container and
+    does not require a GUI on the Docker host. When CRD is enabled, ask the user
+    to choose the Google account in their own browser, generate the short-lived
+    Linux command, paste it directly into the trusted Tailscale SSH session, and
+    enter the PIN at its hidden prompt. Apple silicon omits CRD and uses noVNC.
 14. **Codex and Chrome:** Ask the user to sign in to Codex, install the Chrome
     plugin and official extension, choose the required website permissions, and
     decide whether full CDP is truly necessary.
@@ -114,8 +116,8 @@ the node, then let the waiting command finish. Do not choose an account for them
 
 ## 4. Coordinate user-only desktop steps
 
-On Ubuntu, the agent must not ask the user to paste the CRD authorization code
-or PIN into chat. Direct the user to:
+On Ubuntu with CRD enabled, the agent must not ask the user to paste the CRD
+authorization code or PIN into chat. Direct the user to:
 
 1. Generate the Linux registration command at
    <https://remotedesktop.google.com/headless>.
@@ -129,9 +131,9 @@ or PIN into chat. Direct the user to:
 8. Configure full CDP only if required and accept that approval prompts may
    prevent fully unattended use.
 
-On Apple silicon, omit steps 1-4. Retrieve the one-click noVNC URL only in the
-trusted local container TTY, open it from the tailnet, sign in to Codex, and
-continue with the Chrome integration steps.
+On Apple silicon or Ubuntu with CRD disabled, omit steps 1-4. Retrieve the
+one-click noVNC URL only in the trusted local container TTY, open it from the
+tailnet, sign in to Codex, and continue with the Chrome integration steps.
 
 For both platforms, direct the user to install the Playwright extension in the
 same Chrome profile and run `remote-browser-extension-token` in a trusted
@@ -152,8 +154,8 @@ On macOS use
 Then complete real workflow acceptance:
 
 - Tailscale SSH succeeds from an allowed device.
-- authenticated noVNC shows the Xfce session; on Ubuntu, CRD shows that same
-  session.
+- authenticated noVNC shows the Xfce session; when enabled on Ubuntu, CRD shows
+  that same session.
 - Codex and Chrome are running as UID 10001.
 - Chrome reports connected in Codex.
 - One harmless `@Chrome` task succeeds.
@@ -169,8 +171,8 @@ Then complete real workflow acceptance:
 
 Report the target hostname, deployed commit, immutable image reference, service
 health, non-sensitive Tailscale identity and Serve summary,
-CRD/noVNC/Codex/Chrome/MCP test results, backup location, and any incomplete
-user-only step.
+configured desktop mode, CRD/noVNC/Codex/Chrome/MCP test results, backup
+location, and any incomplete user-only step.
 
 Never include auth keys, CRD codes, PINs, browser cookies, gateway credentials,
 extension tokens, OAuth material, private profile contents, or Tailscale state

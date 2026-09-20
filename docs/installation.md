@@ -2,8 +2,9 @@
 
 This is a Tailscale-only deployment. It publishes no Docker host ports and
 does not add a LAN or public-IP access mode. Tailscale SSH, Tailscale Serve
-HTTPS, authenticated noVNC, remote Playwright MCP, and Chrome Remote Desktop on
-Ubuntu are the supported access paths.
+HTTPS, authenticated noVNC, remote Playwright MCP, and optional Chrome Remote
+Desktop on Ubuntu are the supported access paths. Ubuntu does not require a
+host graphical environment: noVNC-only mode runs Xvfb/Xfce in the container.
 
 ## Requirements
 
@@ -13,7 +14,8 @@ Ubuntu are the supported access paths.
 - Git and tar; Linux also requires jq and `apparmor_parser`
 - At least 8 GiB host memory recommended
 - A Tailscale account with permission to add the device
-- On Ubuntu only, a Google account authorized for Chrome Remote Desktop
+- On Ubuntu only when CRD is enabled, a Google account authorized for Chrome
+  Remote Desktop
 - An interactive trusted terminal for secret and PIN entry
 
 The one-line bootstrap asks before installing missing prerequisites. On Linux
@@ -62,25 +64,26 @@ The installer asks, in order, for:
 2. Tailscale/MagicDNS hostname.
 3. Expected Tailscale account or tailnet label for operator confirmation.
 4. Timezone.
-5. Permitted desktop sizes.
-6. Container memory limit.
-7. Container memory reservation.
-8. CPU limit.
-9. Immutable image reference.
-10. Whether to build the image from the checked-out commit.
-11. Upgrade and full-state-backup confirmation when existing state is found.
-12. Final confirmation before host changes.
-13. Tailscale enrollment method when no persistent enrollment exists.
-14. The one-time Tailscale auth key through a hidden prompt, or completion of
+5. Whether to enable Chrome Remote Desktop on Ubuntu. The default is enabled.
+6. Permitted desktop sizes.
+7. Container memory limit.
+8. Container memory reservation.
+9. CPU limit.
+10. Immutable image reference.
+11. Whether to build the image from the checked-out commit.
+12. Upgrade and full-state-backup confirmation when existing state is found.
+13. Final confirmation before host changes.
+14. Tailscale enrollment method when no persistent enrollment exists.
+15. The one-time Tailscale auth key through a hidden prompt, or completion of
     the browser login URL flow.
-15. Confirmation that the resulting identity belongs to the intended tailnet.
-16. Confirmation that Tailscale Serve exposes only the authenticated HTTPS
+16. Confirmation that the resulting identity belongs to the intended tailnet.
+17. Confirmation that Tailscale Serve exposes only the authenticated HTTPS
     gateway on TCP 443.
 
 It then prints the ordered user-only steps for Codex sign-in, the official
 ChatGPT extension, Playwright extension token provisioning, remote MCP
-configuration, and optional Codex full CDP access. Ubuntu also prints the
-Chrome Remote Desktop registration steps.
+configuration, and optional Codex full CDP access. Ubuntu prints Chrome Remote
+Desktop registration steps only when CRD is enabled.
 
 The installer:
 
@@ -107,10 +110,25 @@ and manages `codex-desktop.service`. On Apple silicon it installs under
 persistent state stores, and installs a per-user launch agent that starts Docker
 Desktop and the Compose project at login.
 
-If Playwright extension provisioning or Ubuntu CRD setup is intentionally
-deferred, use the platform verifier with `--allow-incomplete` for base checks.
-The normal verifier requires the Playwright extension token and running MCP;
-the normal Ubuntu verifier also requires CRD.
+If Playwright extension provisioning or enabled Ubuntu CRD setup is
+intentionally deferred, use the platform verifier with `--allow-incomplete`
+for base checks. The normal verifier requires the Playwright extension token
+and running MCP; the normal Ubuntu verifier requires CRD only when configured.
+
+## Ubuntu noVNC-only mode
+
+Set `CODEX_DESKTOP_CRD_ENABLED=0` in `/etc/codex-desktop/deploy.env`, or answer
+no to the guided installer's CRD prompt. The default is `1`, preserving the
+existing CRD-enabled behavior. The installer builds or accepts only an image
+whose `io.google.chrome-remote-desktop.enabled` label matches this setting; a
+noVNC-only image is built with `INSTALL_CRD=0` and contains no CRD package.
+
+With CRD disabled, the platform-selecting desktop wrapper immediately starts
+Xvfb and Xfce inside the container. x11vnc and noVNC attach to that display, so
+the Docker host itself needs no window system or logged-in graphical user. The
+same persistent Chrome, Codex, and Playwright MCP workflow remains available.
+Tailscale Serve is still the only permanent ingress and no Docker ports are
+published.
 
 ## Tailscale enrollment
 
@@ -181,11 +199,11 @@ does not use it.
 
 ## Register Chrome Remote Desktop on Ubuntu
 
-Skip this section on Apple silicon. Its native ARM64 image does not install
-Chrome Remote Desktop and uses noVNC as the graphical access path.
-
-This step requires a short-lived Google authorization code and a PIN chosen by
-the user. Neither value belongs in chat, Git, logs, or a saved command.
+Skip this section on Apple silicon and on Ubuntu when
+`CODEX_DESKTOP_CRD_ENABLED=0`; authenticated noVNC uses the already-running
+local Xvfb/Xfce session. When CRD is enabled, this step requires a short-lived
+Google authorization code and a PIN chosen by the user. Neither value belongs
+in chat, Git, logs, or a saved command.
 
 1. Open <https://remotedesktop.google.com/headless> in the intended Google
    account.
@@ -218,8 +236,9 @@ Expected status is `STARTED`.
 
 ## Connect Codex and Chrome
 
-Connect through noVNC on Apple silicon, or through Chrome Remote Desktop or
-noVNC on Ubuntu. Codex and Chrome start in the same Xfce session and
+Connect through noVNC on Apple silicon or noVNC-only Ubuntu, or through Chrome
+Remote Desktop or noVNC when Ubuntu CRD is enabled. Codex and Chrome start in
+the same Xfce session and
 automatically recover from process exits.
 At container startup, Chrome is registered as the default HTTP/HTTPS browser
 and Codex is registered for the `codex:` OAuth callback. This lets the Codex
@@ -278,9 +297,9 @@ On Apple silicon, run:
 
 Then perform the interactive acceptance checks:
 
-1. Connect through authenticated noVNC. On Ubuntu, also connect through Chrome
-   Remote Desktop
-   and confirm both show the same desktop and Chrome tabs.
+1. Connect through authenticated noVNC. When Ubuntu CRD is enabled, also connect
+   through Chrome Remote Desktop and confirm both show the same desktop and
+   Chrome tabs.
 2. Run a real `@Chrome` action from Codex.
 3. Restart only `codex-desktop.service` on Ubuntu or the Compose project on
    macOS.
@@ -288,7 +307,7 @@ Then perform the interactive acceptance checks:
    explicitly delete the session. Confirm the action is visible through noVNC.
 5. Confirm Tailscale identity and Serve route, Codex sign-in, both Chrome
    extensions, cookies, gateway credentials, and extension token all survive.
-6. On Ubuntu, confirm CRD registration also survives.
+6. When Ubuntu CRD is enabled, confirm its registration also survives.
 7. Trigger one scheduled task without leaving a remote viewer attached.
 
 ## Upgrade and rollback

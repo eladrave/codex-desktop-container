@@ -66,9 +66,10 @@ mode `0600`; enter it only through the hidden
 agent.
 
 The example configuration deliberately contains no credentials. Authenticate
-Tailscale interactively after the container starts. Ubuntu also requires
-interactive Chrome Remote Desktop registration; Apple silicon does not install
-CRD.
+Tailscale interactively after the container starts. Ubuntu requires interactive
+Chrome Remote Desktop registration only when CRD is enabled; noVNC-only mode
+starts the isolated container display without Google registration. Apple
+silicon does not install CRD.
 
 The one-line bootstrap is mutable when fetched from the `main` branch. For
 review-sensitive environments, download and inspect `bootstrap.sh` before

@@ -4,10 +4,11 @@
 
 A persistent Linux desktop container for the official Codex desktop app, with
 Xfce, an always-on Google Chrome, Tailscale, Tailscale SSH, authenticated noVNC,
-and a remote Playwright MCP server. Ubuntu AMD64 also includes Chrome Remote
-Desktop. Apple silicon uses a fully native ARM64 image and noVNC as its
-graphical access path. Codex, Playwright MCP, and noVNC all use the same visible
-Chrome profile and desktop session.
+and a remote Playwright MCP server. Ubuntu AMD64 includes optional Chrome Remote
+Desktop and can instead run in noVNC-only mode on a server with no host GUI.
+Apple silicon uses a fully native ARM64 image and noVNC as its graphical access
+path. Codex, Playwright MCP, and noVNC all use the same visible Chrome profile
+and desktop session.
 
 This is a single-container, in-place replacement for `remotechromemcp`. It
 preserves bearer-authenticated MCP, optional token-path compatibility, the
@@ -93,9 +94,9 @@ Those host paths apply to Ubuntu. The Apple silicon Compose override uses the
 named volumes `codex-desktop-home`, `codex-desktop-tailscale`, and
 `codex-desktop-machine` for the same container targets.
 
-No ports are published. Tailscale and, on Ubuntu, Chrome Remote Desktop
-establish outbound connections. No Docker socket is mounted, and no existing
-Codex profile is copied into the image.
+No ports are published. Tailscale and, when enabled on Ubuntu, Chrome Remote
+Desktop establish outbound connections. No Docker socket is mounted, and no
+existing Codex profile is copied into the image.
 
 Tailscale runs entirely in userspace, so the container needs no TUN device or
 network-administration capabilities. Tailscale Serve terminates tailnet HTTPS
@@ -121,7 +122,8 @@ to the same persistent visible Chrome. This image does not pass
 - AppArmor tools on an AppArmor-enabled Linux host
 - A Tailscale account and policy that permits Tailscale SSH
 - A tailnet ACL permitting intended clients to reach this node on TCP 443
-- On Ubuntu only, a Google account authorized for Chrome Remote Desktop
+- On Ubuntu only when CRD is enabled, a Google account authorized for Chrome
+  Remote Desktop
 - At least 8 GiB of host RAM is recommended for Codex, Chrome, and the desktop
   session together
 
@@ -165,7 +167,11 @@ path and installs a systemd service. When run directly on Ubuntu, invoke it as
 `sudo ./scripts/install.sh`. On Apple silicon, run it as the normal user; it
 uses Docker Desktop, named volumes, and a user launch agent.
 
-The installer asks for the host configuration and Tailscale enrollment method.
+The installer asks for the host configuration, whether Ubuntu should enable
+Chrome Remote Desktop, and the Tailscale enrollment method. CRD remains enabled
+by default for backwards compatibility. Choosing no builds a no-CRD image and
+starts the container's own Xvfb/Xfce desktop immediately, so authenticated
+noVNC works on a GUI-less host without Google CRD registration.
 A one-time Tailscale auth key is accepted only through a hidden terminal prompt
 and is removed from container tmpfs immediately after use. The alternative
 browser flow prints a login URL for the user to open and approve in the intended
@@ -195,8 +201,9 @@ sudo systemctl daemon-reload
 
 Edit `/etc/codex-desktop/deploy.env` if you want a different timezone,
 container hostname, Tailscale hostname, desktop sizes, or container resource
-limits. Do not put Tailscale keys, CRD codes, PINs, or other credentials in
-that file.
+limits. Set `CODEX_DESKTOP_CRD_ENABLED=0` only with an image built using
+`--build-arg INSTALL_CRD=0`; the default `1` preserves CRD behavior. Do not put
+Tailscale keys, CRD codes, PINs, or other credentials in that file.
 
 ## First start and Tailscale enrollment
 
@@ -240,7 +247,9 @@ inside the container, and identity recovery, see
 ## Register Chrome Remote Desktop on Ubuntu
 
 Apple silicon does not install Chrome Remote Desktop; use tailnet noVNC instead.
-On Ubuntu, open a trusted browser signed into the intended Google account and visit
+On Ubuntu, skip this section when `CODEX_DESKTOP_CRD_ENABLED=0`. The local
+Xvfb/Xfce session is already running and available through authenticated noVNC.
+When CRD is enabled, open a trusted browser signed into the intended Google account and visit
 <https://remotedesktop.google.com/headless> and select the Debian/Linux setup.
 Use the generated command promptly because its OAuth code is short-lived.
 
@@ -284,9 +293,10 @@ backends and must not be opened directly. See
 
 ## Connect Codex to persistent Chrome
 
-Connect to the Xfce desktop through noVNC on Apple silicon or through either
-remote-desktop option on Ubuntu. Codex and Chrome should both open
-automatically. Complete this one-time setup in the persistent desktop:
+Connect to the Xfce desktop through noVNC on Apple silicon or noVNC-only Ubuntu,
+or through either remote-desktop option when Ubuntu CRD is enabled. Codex and
+Chrome should both open automatically. Complete this one-time setup in the
+persistent desktop:
 
 1. Sign in to Codex.
 2. Open **Settings > Computer Use**, select Google Chrome, and follow the prompt
@@ -354,14 +364,19 @@ docker exec -u codex codex-desktop-desktop-1 \
   /opt/google/chrome-remote-desktop/chrome-remote-desktop --get-status
 ```
 
+The final CRD status command applies only when
+`CODEX_DESKTOP_CRD_ENABLED=1`. In noVNC-only mode, verify that
+`desktop-session`, `x11vnc`, and `novnc` report `RUNNING` and connect through
+the authenticated noVNC URL.
+
 On Apple silicon:
 
 ```bash
 ~/.local/share/codex-desktop/source/scripts/verify-macos.sh
 ```
 
-Finally, connect through authenticated noVNC, or Chrome Remote Desktop on
-Ubuntu, and confirm
+Finally, connect through authenticated noVNC, or Chrome Remote Desktop when it
+is enabled on Ubuntu, and confirm
 that Xfce, Codex, and Chrome open. Confirm the extension reports connected in Codex, run one
 `@Chrome` action, restart the service, and repeat the action without reinstalling
 the extension or signing back into the test site. Initialize MCP through its
@@ -379,7 +394,8 @@ sudo systemctl restart codex-desktop.service
 ```
 
 Verify the package versions, Tailscale identity, Serve route, gateway and MCP
-processes, and a real desktop connection; also verify CRD status on Ubuntu.
+processes, and a real desktop connection; also verify CRD status when enabled
+on Ubuntu.
 Roll back by restoring the prior `IMAGE_REF` and restarting the same service.
 Never remove persistent state or rotate gateway credentials during an ordinary
 upgrade or rollback.

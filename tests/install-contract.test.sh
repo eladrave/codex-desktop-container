@@ -34,6 +34,12 @@ grep -Fq 'Does this new enrollment belong to the intended account/tailnet?' scri
 grep -Fq 'deployment_activated' scripts/install.sh
 grep -Fq -- '--allow-incomplete' scripts/verify-deployment.sh docs/installation.md
 grep -Fq 'Chrome Remote Desktop is not registered and STARTED.' scripts/verify-deployment.sh
+grep -Fq "s/^CODEX_DESKTOP_CRD_ENABLED=//p" scripts/verify-deployment.sh
+grep -Fq 'io.google.chrome-remote-desktop.enabled' scripts/verify-deployment.sh
+grep -Fq 'packages+=(chrome-remote-desktop)' scripts/verify-deployment.sh
+grep -Fq 'crd_status=NOT_INSTALLED' scripts/verify-deployment.sh
+grep -Fq "pgrep -u 10001 -x Xvfb" scripts/verify-deployment.sh
+grep -Fq '"${crd_incomplete}" == 1' scripts/verify-deployment.sh
 grep -Fq 'Playwright MCP extension token is not configured.' \
   scripts/verify-deployment.sh
 grep -Fq 'test ! -e /run/secrets/tailscale-auth-key' scripts/verify-deployment.sh
@@ -47,6 +53,15 @@ grep -Fq 'TAILSCALE_ELF_MACHINE_HEX="3e00"' Dockerfile
 grep -Fq 'CODEX_DESKTOP_TAILSCALE_ELF_MACHINE_HEX' Dockerfile healthcheck.sh
 grep -Fq 'status --json 2>/dev/null || true' healthcheck.sh
 grep -Fq "CHROME_REMOTE_DESKTOP_DEFAULT_DESKTOP_SIZES: \${DESKTOP_SIZES" compose.yaml
+grep -Fq 'CODEX_DESKTOP_CRD_ENABLED: "${CODEX_DESKTOP_CRD_ENABLED:-1}"' compose.yaml
+grep -Fxq 'CODEX_DESKTOP_CRD_ENABLED=1' deploy.env.example
+grep -Fq "read_existing_value CODEX_DESKTOP_CRD_ENABLED 1" scripts/install.sh
+grep -Fq 'Enable Chrome Remote Desktop in addition to authenticated noVNC?' scripts/install.sh
+grep -Fq "printf 'CODEX_DESKTOP_CRD_ENABLED=%s\\n' \"\${crd_enabled}\"" scripts/install.sh
+grep -Fq 'User-only desktop setup still required (no CRD registration):' scripts/install.sh
+grep -Fq -- '--build-arg "INSTALL_CRD=${crd_enabled}"' scripts/install.sh
+grep -Fq 'io.google.chrome-remote-desktop.enabled' scripts/install.sh
+grep -Fq 'does not match the selected Chrome Remote Desktop mode' scripts/install.sh
 grep -Fq -- '--tun=userspace-networking' supervisord.conf
 grep -Fq 'platform: linux/arm64' compose.macos.yaml
 grep -Fq 'INSTALL_CRD=0' scripts/install-macos.sh

@@ -15,6 +15,10 @@ services:
       TZ: ${TZ:-Etc/UTC}
       TS_STATE_DIR: /var/lib/tailscale
       TS_HOSTNAME: ${TAILSCALE_HOSTNAME:-codex-desktop}
+      # Ubuntu defaults to CRD for backwards compatibility. Set this to 0 to
+      # start the container-managed Xvfb/Xfce session immediately and use
+      # authenticated noVNC on a host with no graphical environment.
+      CODEX_DESKTOP_CRD_ENABLED: "${CODEX_DESKTOP_CRD_ENABLED:-1}"
       CHROME_REMOTE_DESKTOP_DEFAULT_DESKTOP_SIZES: ${DESKTOP_SIZES:-1920x1080,2560x1440}
       CHROME_REMOTE_DESKTOP_USE_XVFB: "1"
       LIBGL_ALWAYS_SOFTWARE: "1"

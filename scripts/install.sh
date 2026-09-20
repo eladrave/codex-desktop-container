@@ -234,16 +234,20 @@ repo_git rev-parse --is-inside-work-tree >/dev/null 2>&1 || \
 
 source_revision="$(repo_git rev-parse HEAD)"
 short_revision="${source_revision:0:12}"
-commit_image_ref="codex-desktop:chatgpt-26.820.60940-crd-154.0.8037.11-ts1.102.4-11-g${short_revision}"
+deployed_source_matches=0
 if [[ -r "${service_dir}/REVISION" && \
   "$(<"${service_dir}/REVISION")" == "${source_revision}" ]]; then
-  default_image_ref="$(read_existing_value IMAGE_REF "${commit_image_ref}")"
-else
-  default_image_ref="${commit_image_ref}"
+  deployed_source_matches=1
 fi
 default_container_hostname="$(read_existing_value CONTAINER_HOSTNAME codex-desktop)"
 default_tailscale_hostname="$(read_existing_value TAILSCALE_HOSTNAME codex-desktop)"
 default_timezone="$(read_existing_value TZ Etc/UTC)"
+default_crd_enabled="$(read_existing_value CODEX_DESKTOP_CRD_ENABLED 1)"
+case "${default_crd_enabled}" in
+  1) default_crd_choice=yes ;;
+  0) default_crd_choice=no ;;
+  *) die 'Existing CODEX_DESKTOP_CRD_ENABLED must be 0 or 1.' ;;
+esac
 default_desktop_sizes="$(read_existing_value DESKTOP_SIZES '1920x1080,2560x1440')"
 default_mem_limit="$(read_existing_value MEM_LIMIT 6g)"
 default_mem_reservation="$(read_existing_value MEM_RESERVATION 1g)"
@@ -253,6 +257,8 @@ container_hostname=
 tailscale_hostname=
 tailnet_label=
 timezone=
+crd_choice=
+crd_enabled=
 desktop_sizes=
 mem_limit=
 mem_reservation=
@@ -298,7 +304,7 @@ fi
 
 printf '%s\n' \
   'Codex Desktop guided installation' \
-  'No public or LAN ports will be published. Tailscale HTTPS/SSH and CRD remain the access paths.' \
+  'No public or LAN ports will be published. Tailscale HTTPS/SSH and authenticated noVNC remain available.' \
   '' >/dev/tty
 
 prompt_default container_hostname 'Container hostname' "${default_container_hostname}"
@@ -311,6 +317,26 @@ prompt_default tailnet_label \
 prompt_default timezone 'Timezone' "${default_timezone}"
 validate_timezone "${timezone}" || die 'Invalid timezone.'
 [[ -e "/usr/share/zoneinfo/${timezone}" ]] || die 'Timezone was not found under /usr/share/zoneinfo.'
+prompt_yes_no crd_choice \
+  'Enable Chrome Remote Desktop in addition to authenticated noVNC?' \
+  "${default_crd_choice}"
+if [[ "${crd_choice}" == yes ]]; then
+  crd_enabled=1
+  commit_image_ref="codex-desktop:chatgpt-26.820.60940-crd-154.0.8037.11-ts1.102.4-11-g${short_revision}"
+else
+  crd_enabled=0
+  commit_image_ref="codex-desktop:chatgpt-26.820.60940-chrome-152.0.7977.64-ts1.102.4-amd64-nocrd-12-g${short_revision}"
+fi
+default_image_ref="${commit_image_ref}"
+if ((deployed_source_matches == 1)); then
+  existing_config_image_ref="$(read_existing_value IMAGE_REF "${commit_image_ref}")"
+  if docker image inspect "${existing_config_image_ref}" >/dev/null 2>&1 && \
+    [[ "$(docker image inspect "${existing_config_image_ref}" \
+      --format '{{index .Config.Labels "io.google.chrome-remote-desktop.enabled"}}')" == \
+      "${crd_enabled}" ]]; then
+    default_image_ref="${existing_config_image_ref}"
+  fi
+fi
 prompt_default desktop_sizes 'Desktop sizes, comma separated' "${default_desktop_sizes}"
 validate_desktop_sizes "${desktop_sizes}" || die 'Invalid desktop-size list.'
 prompt_default mem_limit 'Container memory limit' "${default_mem_limit}"
@@ -338,6 +364,12 @@ while true; do
       printf 'That image tag already belongs to another source revision. Enter a new immutable tag.\n' >/dev/tty
       continue
     fi
+    existing_image_crd="$(docker image inspect "${image_ref}" \
+      --format '{{index .Config.Labels "io.google.chrome-remote-desktop.enabled"}}')"
+    if [[ "${existing_image_crd}" != "${crd_enabled}" ]]; then
+      printf 'That image does not match the selected Chrome Remote Desktop mode. Enter a matching immutable tag.\n' >/dev/tty
+      continue
+    fi
     build_default=no
   else
     build_default=yes
@@ -361,6 +393,11 @@ printf '  Container hostname: %s\n' "${container_hostname}" >/dev/tty
 printf '  Tailscale hostname: %s\n' "${tailscale_hostname}" >/dev/tty
 printf '  Expected tailnet/account: %s\n' "${tailnet_label}" >/dev/tty
 printf '  Timezone: %s\n' "${timezone}" >/dev/tty
+if [[ "${crd_enabled}" == 1 ]]; then
+  printf '  Desktop access: authenticated noVNC and Chrome Remote Desktop\n' >/dev/tty
+else
+  printf '  Desktop access: authenticated noVNC (container-managed Xvfb/Xfce)\n' >/dev/tty
+fi
 printf '  Desktop sizes: %s\n' "${desktop_sizes}" >/dev/tty
 printf '  Resources: %s memory, %s reservation, %s CPUs\n' \
   "${mem_limit}" "${mem_reservation}" "${cpu_limit}" >/dev/tty
@@ -389,11 +426,15 @@ if [[ "${build_image}" == yes ]]; then
 fi
 if [[ "${build_image}" == yes ]]; then
   docker build --pull --platform linux/amd64 \
+    --build-arg "INSTALL_CRD=${crd_enabled}" \
     --build-arg "VCS_REF=${source_revision}" \
     --tag "${image_ref}" "${repo_dir}"
   [[ "$(docker image inspect "${image_ref}" \
     --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" == \
     "${source_revision}" ]] || die 'Built image revision label does not match the source commit.'
+  [[ "$(docker image inspect "${image_ref}" \
+    --format '{{index .Config.Labels "io.google.chrome-remote-desktop.enabled"}}')" == \
+    "${crd_enabled}" ]] || die 'Built image Chrome Remote Desktop mode does not match the selected runtime mode.'
 else
   docker image inspect "${image_ref}" >/dev/null 2>&1 || \
     die 'The selected image is not available locally.'
@@ -401,6 +442,10 @@ else
     --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" == \
     "${source_revision}" ]] || \
     die 'Existing image revision label does not match the checked-out commit.'
+  [[ "$(docker image inspect "${image_ref}" \
+    --format '{{index .Config.Labels "io.google.chrome-remote-desktop.enabled"}}')" == \
+    "${crd_enabled}" ]] || \
+    die 'Existing image Chrome Remote Desktop mode does not match the selected runtime mode.'
 fi
 
 backup_dir=/var/backups/codex-desktop/"$(date -u '+%Y%m%dT%H%M%SZ')"
@@ -453,6 +498,7 @@ chmod 0600 "${config_tmp}"
   printf 'CONTAINER_HOSTNAME=%s\n' "${container_hostname}"
   printf 'TAILSCALE_HOSTNAME=%s\n' "${tailscale_hostname}"
   printf 'TZ=%s\n' "${timezone}"
+  printf 'CODEX_DESKTOP_CRD_ENABLED=%s\n' "${crd_enabled}"
   printf 'DESKTOP_SIZES=%s\n' "${desktop_sizes}"
   printf 'MEM_LIMIT=%s\n' "${mem_limit}"
   printf 'MEM_RESERVATION=%s\n' "${mem_reservation}"
@@ -584,21 +630,37 @@ fi
 
 printf '\nHost deployment and Tailscale enrollment completed.\n' >/dev/tty
 printf 'Backup created at %s\n' "${backup_dir}" >/dev/tty
-printf '%s\n' \
-  '' \
-  'User-only desktop setup still required:' \
-  '1. Open https://remotedesktop.google.com/headless in the intended Google account.' \
-  '2. Generate the Debian/Linux registration command.' \
-  "3. Connect with: tailscale ssh root@${tailscale_hostname}" \
-  '4. Run: set +o history' \
-  '5. Paste and run the registration command directly, then run: set -o history' \
-  '6. Enter the CRD PIN only at its hidden prompt.' \
-  '7. Connect through Chrome Remote Desktop; sign in to Codex.' \
-  '8. In Codex Settings > Computer Use, install the Chrome plugin and official extension.' \
-  '9. In the same Chrome profile, install the Playwright MCP extension and obtain its connection token.' \
-  '10. Run remote-browser-extension-token and enter that token only at its hidden prompt.' \
-  '11. Run remote-browser-credentials only in this trusted TTY to retrieve the MCP and one-click noVNC details.' \
-  '12. Confirm Chrome shows Manage, test one @Chrome action, and test one MCP browser action.' \
-  '13. Enable Codex full CDP only if a scheduled task genuinely needs it; the remote MCP does not require it.' \
-  '14. Run sudo /opt/services/codex-desktop/scripts/verify-deployment.sh.' \
-  '15. Optional: run sudo /opt/services/codex-desktop/scripts/install-functional-canary.sh to validate and schedule the hourly MCP canary.' >/dev/tty
+if [[ "${crd_enabled}" == 1 ]]; then
+  printf '%s\n' \
+    '' \
+    'User-only desktop setup still required:' \
+    '1. Open https://remotedesktop.google.com/headless in the intended Google account.' \
+    '2. Generate the Debian/Linux registration command.' \
+    "3. Connect with: tailscale ssh root@${tailscale_hostname}" \
+    '4. Run: set +o history' \
+    '5. Paste and run the registration command directly, then run: set -o history' \
+    '6. Enter the CRD PIN only at its hidden prompt.' \
+    '7. Connect through Chrome Remote Desktop or authenticated noVNC; sign in to Codex.' \
+    '8. In Codex Settings > Computer Use, install the Chrome plugin and official extension.' \
+    '9. In the same Chrome profile, install the Playwright MCP extension and obtain its connection token.' \
+    '10. Run remote-browser-extension-token and enter that token only at its hidden prompt.' \
+    '11. Run remote-browser-credentials only in this trusted TTY to retrieve the MCP and one-click noVNC details.' \
+    '12. Confirm Chrome shows Manage, test one @Chrome action, and test one MCP browser action.' \
+    '13. Enable Codex full CDP only if a scheduled task genuinely needs it; the remote MCP does not require it.' \
+    '14. Run sudo /opt/services/codex-desktop/scripts/verify-deployment.sh.' \
+    '15. Optional: run sudo /opt/services/codex-desktop/scripts/install-functional-canary.sh to validate and schedule the hourly MCP canary.' >/dev/tty
+else
+  printf '%s\n' \
+    '' \
+    'User-only desktop setup still required (no CRD registration):' \
+    "1. Connect with: tailscale ssh root@${tailscale_hostname}" \
+    '2. Run remote-browser-credentials only in this trusted TTY to retrieve the MCP and one-click noVNC details.' \
+    '3. Open the displayed authenticated noVNC URL; sign in to Codex.' \
+    '4. In Codex Settings > Computer Use, install the Chrome plugin and official extension.' \
+    '5. In the same Chrome profile, install the Playwright MCP extension and obtain its connection token.' \
+    '6. Run remote-browser-extension-token and enter that token only at its hidden prompt.' \
+    '7. Confirm Chrome shows Manage, test one @Chrome action, and test one MCP browser action.' \
+    '8. Enable Codex full CDP only if a scheduled task genuinely needs it; the remote MCP does not require it.' \
+    '9. Run sudo /opt/services/codex-desktop/scripts/verify-deployment.sh.' \
+    '10. Optional: run sudo /opt/services/codex-desktop/scripts/install-functional-canary.sh to validate and schedule the hourly MCP canary.' >/dev/tty
+fi

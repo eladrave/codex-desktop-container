@@ -12,6 +12,7 @@ grep -Fq -- '-nolisten tcp' run-local-desktop.sh
 grep -Fq 'dbus-run-session -- xfce4-session' run-local-desktop.sh
 grep -Fq 'DISPLAY=%s\nXAUTHORITY=%s\n' run-local-desktop.sh
 grep -Fq '[program:desktop-session]' supervisord.conf
+grep -Fq 'CODEX_DESKTOP_CRD_ENABLED: "${CODEX_DESKTOP_CRD_ENABLED:-1}"' compose.yaml
 grep -Fq 'CODEX_DESKTOP_CRD_ENABLED: "0"' compose.macos.yaml
 if grep -Fq '[program:chrome-remote-desktop]' supervisord.conf; then
   echo 'Supervisor must use the platform-selecting desktop session wrapper.' >&2

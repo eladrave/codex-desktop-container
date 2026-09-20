@@ -20,6 +20,14 @@ running="$(docker inspect --format '{{.State.Running}}' "${container}")"
 
 image_id="$(docker inspect --format '{{.Image}}' "${container}")"
 image_arch="$(docker image inspect --format '{{.Architecture}}' "${image_id}")"
+image_crd="$(docker image inspect --format \
+  '{{index .Config.Labels "io.google.chrome-remote-desktop.enabled"}}' \
+  "${image_id}")"
+runtime_crd="$(docker exec "${container}" printenv CODEX_DESKTOP_CRD_ENABLED)"
+[[ "${image_crd}" == 0 || "${image_crd}" == 1 ]] ||
+  fail "invalid image CRD label: ${image_crd}"
+[[ "${runtime_crd}" == "${image_crd}" ]] ||
+  fail 'runtime CRD mode does not match the image package mode'
 case "${image_arch}" in
   amd64|arm64) ;;
   *) fail "unsupported image architecture: ${image_arch}" ;;

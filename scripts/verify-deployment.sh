@@ -37,6 +37,11 @@ container_image_id="$(docker inspect "${container_name}" --format '{{.Image}}')"
 image_revision="$(docker image inspect "${container_image_id}" \
   --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')"
 [[ "${image_revision}" == "${deployed_revision}" ]]
+crd_enabled="$(sed -n 's/^CODEX_DESKTOP_CRD_ENABLED=//p' "${config_file}" | tail -n 1)"
+[[ "${crd_enabled}" == 0 || "${crd_enabled}" == 1 ]]
+image_crd_enabled="$(docker image inspect "${container_image_id}" \
+  --format '{{index .Config.Labels "io.google.chrome-remote-desktop.enabled"}}')"
+[[ "${image_crd_enabled}" == "${crd_enabled}" ]]
 
 state="$(docker inspect "${container_name}" \
   --format '{{.State.Status}} {{.State.Health.Status}} {{json .NetworkSettings.Ports}}')"
@@ -44,8 +49,11 @@ state="$(docker inspect "${container_name}" \
 
 docker exec "${container_name}" /usr/local/sbin/codex-desktop-healthcheck
 docker exec "${container_name}" supervisorctl status
-docker exec "${container_name}" dpkg-query -W \
-  chatgpt chrome-remote-desktop google-chrome-stable novnc websockify x11vnc
+packages=(chatgpt google-chrome-stable novnc websockify x11vnc)
+if [[ "${crd_enabled}" == 1 ]]; then
+  packages+=(chrome-remote-desktop)
+fi
+docker exec "${container_name}" dpkg-query -W "${packages[@]}"
 [[ "$(docker exec "${container_name}" dpkg --print-architecture)" == amd64 ]]
 [[ "$(docker exec "${container_name}" node -p process.arch)" == x64 ]]
 [[ "$(docker exec "${container_name}" playwright-mcp --version)" == \
@@ -120,22 +128,33 @@ tailscale_summary="$(
 printf 'Tailscale: %s\n' "${tailscale_summary}"
 docker exec "${container_name}" test ! -e /run/secrets/tailscale-auth-key
 
-crd_status=NOT_REGISTERED
-if docker exec "${container_name}" \
-  bash -c "compgen -G '/home/codex/.config/chrome-remote-desktop/host#*.json' >/dev/null"; then
-  crd_status="$(
-    docker exec "${container_name}" \
-      setpriv --reuid=10001 --regid=10001 --init-groups \
-      env HOME=/home/codex USER=codex LOGNAME=codex SHELL=/bin/bash \
-      /opt/google/chrome-remote-desktop/chrome-remote-desktop --get-status
-  )"
-  [[ "${crd_status}" == STARTED ]]
+crd_status=NOT_INSTALLED
+crd_incomplete=0
+if [[ "${crd_enabled}" == 1 ]]; then
+  crd_status=NOT_REGISTERED
+  if docker exec "${container_name}" \
+    bash -c "compgen -G '/home/codex/.config/chrome-remote-desktop/host#*.json' >/dev/null"; then
+    crd_status="$(
+      docker exec "${container_name}" \
+        setpriv --reuid=10001 --regid=10001 --init-groups \
+        env HOME=/home/codex USER=codex LOGNAME=codex SHELL=/bin/bash \
+        /opt/google/chrome-remote-desktop/chrome-remote-desktop --get-status
+    )"
+    [[ "${crd_status}" == STARTED ]]
+  fi
+  if [[ "${crd_status}" != STARTED ]]; then
+    crd_incomplete=1
+    if [[ "${allow_incomplete}" == 0 ]]; then
+      echo 'Chrome Remote Desktop is not registered and STARTED.' >&2
+      exit 1
+    fi
+  fi
+else
+  docker exec "${container_name}" sh -c \
+    '! dpkg-query -W chrome-remote-desktop >/dev/null 2>&1 && test ! -e /opt/google/chrome-remote-desktop'
+  docker exec "${container_name}" pgrep -u 10001 -x Xvfb >/dev/null
 fi
 printf 'Chrome Remote Desktop: %s\n' "${crd_status}"
-if [[ "${crd_status}" != STARTED && "${allow_incomplete}" == 0 ]]; then
-  echo 'Chrome Remote Desktop is not registered and STARTED.' >&2
-  exit 1
-fi
 
 extension_configured=0
 if docker exec "${container_name}" test -s "${extension_token_file}"; then
@@ -161,7 +180,7 @@ if [[ "${extension_configured}" == 0 && "${allow_incomplete}" == 0 ]]; then
 fi
 
 if [[ "${allow_incomplete}" == 1 && \
-  ("${crd_status}" != STARTED || "${extension_configured}" == 0) ]]; then
+  ("${crd_incomplete}" == 1 || "${extension_configured}" == 0) ]]; then
   printf 'Base deployment checks passed; user-only setup remains incomplete.\n'
 else
   printf 'Codex Desktop deployment verification passed.\n'
