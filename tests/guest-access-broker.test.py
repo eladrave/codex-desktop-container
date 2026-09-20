@@ -12,6 +12,8 @@ import json
 import os
 import socket
 import stat
+import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -222,6 +224,26 @@ class GuestAccessBrokerTests(unittest.TestCase):
         self.assertEqual(stat.S_IMODE((self.directory / "status.json").stat().st_mode), 0o440)
         self.assertEqual(set(json.loads(status_text)), {"state", "expiresAt", "redeemed"})
         self.assertEqual(instance.revoke(), {"ok": True, "state": "CLOSED"})
+
+    @unittest.skipUnless(
+        sys.platform.startswith("linux") and Path("/usr/bin/setpriv").is_file(),
+        "Linux setpriv required",
+    )
+    def test_pdeath_child_survives_request_thread_completion(self) -> None:
+        fixture = Fixture(self.directory)
+        instance = self.make_broker(fixture)
+        process = instance._start_child([
+            "/usr/bin/setpriv", "--pdeathsig", "TERM", "/bin/sleep", "30",
+        ], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        try:
+            # _start_child has returned to this request thread. The child must
+            # stay alive because its Linux parent is the persistent executor.
+            time.sleep(0.1)
+            self.assertIsNone(process.poll())
+        finally:
+            process.terminate()
+            process.wait(timeout=2)
+            instance.shutdown()
 
     def test_strict_schema_and_frame_bound(self) -> None:
         fixture = Fixture(self.directory)

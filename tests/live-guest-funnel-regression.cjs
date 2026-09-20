@@ -103,19 +103,25 @@ function request(url, address, options = {}, body) {
   });
 }
 
-async function publicAddress(hostname) {
-  const resolver = new dns.Resolver();
-  resolver.setServers(['8.8.8.8', '1.1.1.1']);
+async function publicAddresses(hostname) {
+  const found = new Set();
   for (let attempt = 0; attempt < 30; attempt += 1) {
-    try {
-      const addresses = await resolver.resolve4(hostname);
-      if (addresses.length)
-        return addresses[0];
-    } catch {
-      // Funnel DNS can take a short time to become public after first enable.
+    for (const server of ['8.8.8.8', '1.1.1.1']) {
+      const resolver = new dns.Resolver();
+      resolver.setServers([server]);
+      try {
+        for (const address of await resolver.resolve4(hostname))
+          found.add(address);
+      } catch {
+        // Funnel DNS can take a short time to become public after first enable.
+      }
     }
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    if (found.size >= 2 || (found.size && attempt >= 4))
+      return [...found];
+    await new Promise(resolve => setTimeout(resolve, 500));
   }
+  if (found.size)
+    return [...found];
   throw new Error('dns');
 }
 
@@ -200,13 +206,30 @@ async function main() {
       throw new Error('validate');
     }
     stage = 'public-dns';
-    const address = await publicAddress(guest.hostname);
+    const addresses = await publicAddresses(guest.hostname);
 
     stage = 'landing';
-    const landing = await request(guest, address);
-    if (landing.status !== 200 || !landing.body.includes('/guest/redeem.js') ||
-        !landing.body.includes(token)) {
-      stage = `landing-${landing.status}-${landing.body.includes('/guest/redeem.js')}-${landing.body.includes(token)}`;
+    let address;
+    let landing;
+    for (const candidate of addresses) {
+      try {
+        const response = await request(guest, candidate);
+        if (response.status === 200 && response.body.includes('/guest/redeem.js') &&
+            response.body.includes(token)) {
+          address = candidate;
+          landing = response;
+          break;
+        }
+        landing = response;
+      } catch {
+        // Funnel publishes multiple relay addresses. Try every public A record
+        // because one relay can be temporarily unavailable while another is live.
+      }
+    }
+    if (!address || !landing) {
+      stage = landing
+        ? `landing-${landing.status}-${landing.body.includes('/guest/redeem.js')}-${landing.body.includes(token)}`
+        : 'landing-all-relays-unavailable';
       throw new Error('landing');
     }
 

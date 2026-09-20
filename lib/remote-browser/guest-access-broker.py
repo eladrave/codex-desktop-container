@@ -10,6 +10,7 @@ only accepted request field is ``action`` and the only actions are ``create``,
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import json
 import os
 import re
@@ -191,6 +192,14 @@ class GuestAccessBroker:
         self._state_lock = threading.RLock()
         self._operation_lock = threading.Lock()
         self._server: socket.socket | None = None
+        # PR_SET_PDEATHSIG is tied to the creating Linux thread, not merely the
+        # broker process. Socket requests run on short-lived threads, so launch
+        # every protected child from one executor thread that lives until broker
+        # shutdown. Otherwise the children die immediately after create returns.
+        self._child_owner = concurrent.futures.ThreadPoolExecutor(
+            max_workers=1,
+            thread_name_prefix="guest-child-owner",
+        )
         self._write_status()
 
     def _test_override(self, name: str, production_value: str) -> str:
@@ -208,6 +217,15 @@ class GuestAccessBroker:
         except PermissionError:
             if not self.test_mode:
                 raise
+
+    def _start_child(self, arguments: list[str], **options: Any) -> subprocess.Popen[Any]:
+        if self._shutdown.is_set():
+            raise BrokerError("Guest access is shutting down")
+        return self._child_owner.submit(
+            subprocess.Popen,
+            arguments,
+            **options,
+        ).result(timeout=self.command_timeout)
 
     def _write_status(self) -> None:
         with self._state_lock:
@@ -400,6 +418,8 @@ class GuestAccessBroker:
 
     def create(self) -> dict[str, object]:
         with self._operation_lock:
+            if self._shutdown.is_set():
+                return self._error("Guest access is shutting down")
             if not self.enabled:
                 return self._error("Guest access is disabled")
             if self.edge_mode:
@@ -451,7 +471,7 @@ class GuestAccessBroker:
                 self._ready.clear()
                 self._closing = False
                 self._pending_redeemed = False
-                self._session = subprocess.Popen(
+                self._session = self._start_child(
                     [
                         self.setpriv_bin,
                         "--pdeathsig",
@@ -486,7 +506,7 @@ class GuestAccessBroker:
                 if self._session.poll() is not None:
                     raise BrokerError("Guest session could not be created")
 
-                self._funnel = subprocess.Popen(
+                self._funnel = self._start_child(
                     [
                         self.setpriv_bin,
                         "--pdeathsig",
@@ -793,6 +813,7 @@ class GuestAccessBroker:
             self.socket_path.unlink()
         except FileNotFoundError:
             pass
+        self._child_owner.shutdown(wait=True, cancel_futures=True)
 
 
 def main() -> int:

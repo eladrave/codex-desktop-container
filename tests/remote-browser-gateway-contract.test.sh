@@ -169,6 +169,10 @@ require_literal "${guest_broker}" 'PRODUCTION_TTL = 1800.0' \
   'guest access must have a fixed 30-minute production deadline'
 require_literal "${guest_broker}" 'GUEST_PORT = 10000' \
   'Funnel must use the dedicated external guest port'
+require_literal "${guest_broker}" 'ThreadPoolExecutor' \
+  'pdeath-protected guest children need a persistent Linux parent thread'
+require_literal "${guest_broker}" 'thread_name_prefix="guest-child-owner"' \
+  'guest child ownership must use the dedicated persistent executor'
 require_literal "${guest_broker}" 'PROXY_PORT = 8444' \
   'Funnel must target the dedicated local guest proxy'
 require_literal "${guest_broker}" '"funnel"' \
