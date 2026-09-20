@@ -25,7 +25,7 @@ Tailscale userspace networking cannot expose them through same-port forwarding.
 
 Use `scripts/install.sh` for a guided installation and
 `scripts/verify-deployment.sh` for acceptance. Collect non-secret choices in the
-documented order. Auth keys, PINs, gateway credentials, extension tokens,
+documented order. Auth keys, PINs, gateway credentials,
 cookies, and browser/Tailscale state must be entered only through their trusted
 interactive surfaces and must never appear in chat, logs, commits, reports, or
 command arguments. The short-lived CRD authorization code is the unavoidable exception:
@@ -43,19 +43,21 @@ suffix, and node name, and only then continue to noVNC or CRD setup. noVNC is
 not used to enroll Tailscale.
 
 Preserve the persistent home, Tailscale state, machine identity, Chrome profile,
-remote-browser gateway credentials, Playwright extension token, and Ubuntu CRD
+remote-browser gateway credentials, and Ubuntu CRD
 registration across upgrades. A legacy noVNC password may remain in the home
 volume but the unified gateway does not use it. Build every change under a new
 immutable image tag and validate the real Tailscale, authenticated noVNC, MCP,
 Codex, Chrome-extension, restart-persistence, scheduled-task, and
 platform-specific Ubuntu CRD workflows before reporting a deployment complete.
 
-The Playwright MCP service uses the stock pinned package in `--extension` mode
-against the one persistent visible Chrome/profile. Do not add a Chrome
-`--remote-debugging-port`, TCP 9222, a second Chrome, or a local patch to
-Playwright MCP. Browser-extension token entry is a user-only step performed
-with `/usr/local/bin/remote-browser-extension-token` at its hidden prompt.
-Never copy the token into chat, a command argument, logs, or `deploy.env`.
+The Playwright MCP service uses the stock pinned package against the one
+persistent headed Chrome/profile. A separate owner process launches Chrome
+with Playwright's private pipe transport and publishes only a protected Unix
+endpoint under `/run/remote-browser/browser`; the MCP connects with
+`--endpoint`. Do not add a Chrome `--remote-debugging-port`, a TCP CDP listener,
+a second Chrome, `--no-sandbox`, disabled extensions, or a local patch to
+Playwright MCP. No Playwright browser extension or extension token is used.
+The official ChatGPT extension is separate and optional for Codex `@Chrome`.
 
 The MCP bearer token, one-click noVNC token, and Basic Auth credentials are
 independent secrets. They are created once in the persistent machine-state

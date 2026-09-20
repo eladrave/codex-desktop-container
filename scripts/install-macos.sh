@@ -607,7 +607,7 @@ done
 ((serve_ready == 1)) || \
   die 'Tailscale Serve did not expose the authenticated gateway within 60 seconds.'
 
-"${source_dir}/scripts/verify-macos.sh" --allow-incomplete
+"${source_dir}/scripts/verify-macos.sh"
 if [[ -n "${prior_gateway_credentials_sha}" ]]; then
   current_gateway_credentials_sha="$(docker exec "${container_name}" \
     sha256sum /var/lib/codex-desktop-persistent/remote-browser/credentials.env | \
@@ -628,8 +628,7 @@ printf '%s\n' \
   '1. Run remote-browser-credentials only in a trusted interactive container TTY.' \
   '2. Open the displayed one-click noVNC HTTPS URL and sign in to Codex in Xfce.' \
   '3. Install the Chrome plugin and official extension through Codex settings.' \
-  '4. Install the Playwright MCP extension in the same Chrome profile.' \
-  '5. Run remote-browser-extension-token and enter its token only at the hidden prompt.' \
-  '6. Test @Chrome and remote MCP, restart the container, and verify persistence.' \
-  '7. Run ~/.local/share/codex-desktop/source/scripts/verify-macos.sh.' \
-  '8. Optional: run ~/.local/share/codex-desktop/source/scripts/install-functional-canary.sh to validate and schedule the hourly MCP canary.' >/dev/tty
+  '4. Test @Chrome. Remote Playwright MCP is already active and needs no browser extension or token.' \
+  '5. Restart the container and verify Codex, Chrome, @Chrome, and remote MCP persistence.' \
+  '6. Run ~/.local/share/codex-desktop/source/scripts/verify-macos.sh.' \
+  '7. Optional: run ~/.local/share/codex-desktop/source/scripts/install-functional-canary.sh to validate and schedule the hourly MCP canary.' >/dev/tty

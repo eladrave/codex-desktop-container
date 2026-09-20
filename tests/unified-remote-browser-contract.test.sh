@@ -31,6 +31,9 @@ require_regex() {
 remote_dir=lib/remote-browser
 required_files=(
   "${remote_dir}/Caddyfile"
+  "${remote_dir}/browser-owner.cjs"
+  "${remote_dir}/mcp-keeper.cjs"
+  "${remote_dir}/migrate-chrome-profile.sh"
   "${remote_dir}/run-playwright-mcp.sh"
   "${remote_dir}/run-gateway.sh"
   "${remote_dir}/prepare-credentials.sh"
@@ -76,17 +79,49 @@ require_literal "${remote_dir}/verify-upstream-playwright-lifecycle.cjs" \
   'REMOTE_CHROME_MCP_LIFECYCLE_PATCH=1' \
   'the verifier must reject the legacy lifecycle patch marker'
 
-require_literal "${remote_dir}/run-playwright-mcp.sh" '--extension' \
-  'Playwright MCP must use extension mode against the visible Chrome'
+require_literal "${remote_dir}/run-playwright-mcp.sh" '--endpoint' \
+  'Playwright MCP must attach to the owned visible Chrome endpoint'
+require_literal "${remote_dir}/run-playwright-mcp.sh" \
+  'endpoint.sock' \
+  'Playwright MCP must use the protected stable Unix endpoint'
 require_regex "${remote_dir}/run-playwright-mcp.sh" \
   '--host([=[:space:]]+)127\.0\.0\.2' \
   'the MCP HTTP backend must bind only to the non-forwarded loopback alias'
 require_regex "${remote_dir}/run-playwright-mcp.sh" \
   '--port([=[:space:]]+)8932' \
   'the MCP HTTP backend must use the private port 8932'
-require_regex "${remote_dir}/run-playwright-mcp.sh" \
-  'REMOTE_BROWSER_EXTENSION_TOKEN_FILE|PLAYWRIGHT_MCP_EXTENSION_TOKEN' \
-  'extension authentication must come from a protected token source'
+if rg -n -- '--extension|EXTENSION_TOKEN|extension-token' \
+  "${remote_dir}/run-playwright-mcp.sh" Dockerfile supervisord.conf; then
+  fail 'remote MCP must not require a Playwright extension or extension token'
+fi
+
+require_literal "${remote_dir}/browser-owner.cjs" \
+  "chromium.launchPersistentContext(profileDir" \
+  'the browser owner must launch one persistent headed context'
+require_literal "${remote_dir}/browser-owner.cjs" 'headless: false' \
+  'the browser owner must launch the visible headed browser'
+require_literal "${remote_dir}/browser-owner.cjs" 'chromiumSandbox: true' \
+  'the browser owner must retain the Chromium sandbox'
+require_literal "${remote_dir}/browser-owner.cjs" \
+  "ignoreDefaultArgs: ['--disable-extensions']" \
+  'the persistent browser must keep installed extensions enabled'
+require_regex "${remote_dir}/browser-owner.cjs" \
+  'browser\.bind\([^,]+,[[:space:]]*\{' \
+  'the browser owner must bind a private pipe endpoint without a TCP host or port'
+require_literal "${remote_dir}/browser-owner.cjs" 'chmod(endpoint, 0o600)' \
+  'the private browser socket must be owner-only'
+require_literal entrypoint.sh \
+  'install -d -o codex -g codex -m 0700 /run/remote-browser/browser' \
+  'the private browser runtime must deny the guest UID'
+require_literal compose.yaml \
+  'CODEX_CHROME_PROFILE_DIR: /home/codex/.config/remote-browser/chrome-profile' \
+  'the browser owner must use a nondefault persistent profile'
+require_literal "${remote_dir}/mcp-keeper.cjs" \
+  "name: 'browser_tabs'" \
+  'the keeper must establish the shared browser with a nonmutating tool'
+require_literal "${remote_dir}/mcp-keeper.cjs" \
+  "arguments: { action: 'list' }" \
+  'the keeper must not navigate or edit the browser'
 
 # There is no Chrome CDP listener at all. Exclude prose and tests so the
 # prohibition can be documented and asserted without tripping itself.
@@ -95,12 +130,14 @@ if rg -n -- '--remote-debugging-(port|address)|(^|[^0-9])9222([^0-9]|$)' \
   run-*.sh lib bootstrap.sh deploy.env.example; then
   fail 'the unified runtime must not configure or probe a Chrome CDP listener'
 fi
-require_regex run-chrome.sh 'user-data-dir=.?\$\{profile_dir\}' \
-  'the visible Chrome must retain the persistent desktop profile'
-if rg -n --glob '!verify-upstream-playwright-lifecycle.cjs' -- \
+require_literal "${remote_dir}/browser-owner.cjs" \
+  "'/home/codex/.config/remote-browser/chrome-profile'" \
+  'the visible Chrome must retain the nondefault persistent desktop profile'
+if rg -n --glob '!browser-owner.cjs' \
+  --glob '!verify-upstream-playwright-lifecycle.cjs' -- \
   '--headless|newContext\(|launchPersistentContext|chromium\.launch' \
   "${remote_dir}"; then
-  fail 'the MCP integration must not start a second or headless browser'
+  fail 'only the dedicated owner may launch the persistent browser'
 fi
 
 # Node and the MCP runtime must be native to the selected image architecture.
@@ -171,6 +208,9 @@ require_literal compose.codexgui.yaml 'remote-chrome' \
   'the CodexGUI override must preserve the existing upstream alias'
 require_literal compose.codexgui.yaml '/var/lib/remote-chrome/profile' \
   'the CodexGUI override must reuse the existing browser profile in place'
+require_literal compose.codexgui.yaml \
+  'target: /home/codex/.config/remote-browser/chrome-profile' \
+  'the CodexGUI profile bind must target the managed nondefault profile directly'
 require_literal compose.codexgui.yaml '/etc/remote-chrome/credentials.env' \
   'the CodexGUI override must preserve the existing public handoff identity'
 require_literal compose.codexgui.yaml 'read_only: true' \
@@ -224,14 +264,19 @@ if rg -n '\[::[01]?\]:(5900|6081|8932)|(^|[^[:alnum:]]):::(5900|6081|8932)' \
 fi
 
 # Supervisor owns each recoverable process independently. MCP/gateway failure
-# must not restart the desktop session or Chrome lifecycle manager.
+# must not restart the desktop session or browser owner.
+require_literal supervisord.conf '[program:remote-browser-owner]' \
+  'the persistent browser must have a dedicated supervisor owner'
 require_literal supervisord.conf '[program:playwright-mcp]' \
   'Playwright MCP must have an independent supervisor program'
+require_literal supervisord.conf '[program:remote-browser-keeper]' \
+  'the shared browser must have a reconnecting keeper'
 require_literal supervisord.conf '[program:remote-browser-gateway]' \
   'the authenticated gateway must have an independent supervisor program'
 require_literal supervisord.conf '[program:remote-browser-guest-access]' \
   'the root guest broker must have an independent supervisor program'
-for program in playwright-mcp remote-browser-gateway remote-browser-guest-access; do
+for program in remote-browser-owner playwright-mcp remote-browser-keeper \
+  remote-browser-gateway remote-browser-guest-access; do
   stanza="$(awk -v program="${program}" '
     $0 == "[program:" program "]" { found=1 }
     found && /^\[/ && $0 != "[program:" program "]" { exit }

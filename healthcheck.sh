@@ -70,15 +70,19 @@ if [[ -n "${tailscale_status}" ]]; then
 fi
 
 chrome_main_running() {
-  local candidate command_line
+  local candidate command_line count=0
   while IFS= read -r candidate; do
     [[ -n "${candidate}" ]] || continue
     command_line="$(tr '\0' ' ' <"/proc/${candidate}/cmdline" 2>/dev/null || true)"
-    [[ "${command_line}" == *'--user-data-dir=/home/codex/.config/google-chrome'* ]] || continue
+    [[ "${command_line}" == *'--user-data-dir=/home/codex/.config/remote-browser/chrome-profile'* ]] || continue
     [[ "${command_line}" == *' --type='* ]] && continue
-    return 0
-  done < <(pgrep -u 10001 -f 'user-data-dir=/home/codex/.config/google-chrome' || true)
-  return 1
+    [[ "${command_line}" != *'--disable-extensions'* ]]
+    [[ "${command_line}" != *'--no-sandbox'* ]]
+    [[ "${command_line}" != *'--disable-setuid-sandbox'* ]]
+    [[ "${command_line}" != *'--remote-debugging-port'* ]]
+    ((count += 1))
+  done < <(pgrep -u 10001 -f 'user-data-dir=/home/codex/.config/remote-browser/chrome-profile' || true)
+  [[ "${count}" == 1 ]]
 }
 
 supervisorctl status remote-browser-gateway | \
@@ -86,6 +90,10 @@ supervisorctl status remote-browser-gateway | \
 supervisorctl status remote-browser-guest-access | \
   grep -Eq '^[^[:space:]]+[[:space:]]+RUNNING([[:space:]]|$)'
 supervisorctl status playwright-mcp | \
+  grep -Eq '^[^[:space:]]+[[:space:]]+RUNNING([[:space:]]|$)'
+supervisorctl status remote-browser-owner | \
+  grep -Eq '^[^[:space:]]+[[:space:]]+RUNNING([[:space:]]|$)'
+supervisorctl status remote-browser-keeper | \
   grep -Eq '^[^[:space:]]+[[:space:]]+RUNNING([[:space:]]|$)'
 supervisorctl status novnc | \
   grep -Eq '^[^[:space:]]+[[:space:]]+RUNNING([[:space:]]|$)'
@@ -104,6 +112,11 @@ if [[ "${CODEX_DESKTOP_CRD_ENABLED}" == 1 ]] && \
     /opt/google/chrome-remote-desktop/chrome-remote-desktop --get-status | \
     grep -qx STARTED
   desktop_ready=1
+elif [[ "${CODEX_DESKTOP_CRD_ENABLED}" == 1 ]]; then
+  # Before CRD registration, run-session deliberately selects the local Xvfb
+  # fallback so noVNC and MCP are immediately usable.
+  pgrep -u 10001 -x Xvfb >/dev/null
+  desktop_ready=1
 elif [[ "${CODEX_DESKTOP_CRD_ENABLED}" == 0 ]]; then
   pgrep -u 10001 -x Xvfb >/dev/null
   desktop_ready=1
@@ -120,7 +133,7 @@ if ((desktop_ready == 1)); then
   chrome_main_running
   pgrep -u 10001 -f '/usr/lib/chatgpt/ChatGPT' >/dev/null
   setpriv --reuid=10001 --regid=10001 --init-groups \
-    test -w /home/codex/.config/google-chrome
+    test -w /home/codex/.config/remote-browser/chrome-profile
   supervisorctl status x11vnc | \
     grep -Eq '^[^[:space:]]+[[:space:]]+RUNNING([[:space:]]|$)'
   pgrep -u 10001 -x x11vnc >/dev/null
@@ -139,6 +152,7 @@ fi
 listeners="$(ss -H -lnt)"
 grep -Eq '127[.]0[.]0[.]2:5900[[:space:]]' <<<"${listeners}"
 grep -Eq '127[.]0[.]0[.]2:6081[[:space:]]' <<<"${listeners}"
+grep -Eq '127[.]0[.]0[.]2:8932[[:space:]]' <<<"${listeners}"
 grep -Eq '127[.]0[.]0[.]1:8443[[:space:]]' <<<"${listeners}"
 if grep -Eq '(^|[[:space:]])(0[.]0[.]0[.]0|\[::\]|:::|\*):(5900|6081|8443|8444|9222)([[:space:]]|$)' \
   <<<"${listeners}"; then
@@ -178,9 +192,13 @@ if grep -Eq '(^|:|\])9222([[:space:]]|$)' <<<"${listeners}"; then
   exit 1
 fi
 
-extension_token=/home/codex/.config/remote-browser/extension-token
-if [[ -e "${extension_token}" ]]; then
-  [[ -f "${extension_token}" && ! -L "${extension_token}" ]]
-  [[ "$(stat -c '%u:%g:%a' "${extension_token}")" == '10001:10001:600' ]]
-  grep -Eq '127[.]0[.]0[.]2:8932[[:space:]]' <<<"${listeners}"
-fi
+browser_runtime=/run/remote-browser/browser
+browser_endpoint=${browser_runtime}/endpoint.sock
+[[ -d "${browser_runtime}" && ! -L "${browser_runtime}" ]]
+[[ "$(stat -c '%u:%g:%a' "${browser_runtime}")" == '10001:10001:700' ]]
+[[ -L "${browser_endpoint}" ]]
+browser_endpoint_target="$(readlink -f "${browser_endpoint}")"
+[[ -n "${browser_endpoint_target}" && -S "${browser_endpoint_target}" ]]
+[[ "$(stat -c '%u:%g:%a' "${browser_endpoint_target}")" == '10001:10001:600' ]]
+setpriv --reuid=10002 --regid=10002 --clear-groups \
+  test ! -x /run/remote-browser

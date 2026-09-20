@@ -199,10 +199,10 @@ Tailnet ACLs must allow intended MCP clients and noVNC viewers to reach TCP
 with `remote-browser-credentials`. Do not route tailnet traffic directly to the
 MCP, noVNC, or VNC backend ports.
 Keep every other node port denied except the explicitly authorized Tailscale
-SSH path. Do not grant this node broad `*:*` access: stock Playwright extension
-mode creates an ephemeral localhost relay, and userspace networking can forward
-tailnet traffic to a matching localhost listener even though Docker publishes
-no ports.
+SSH path. Do not grant this node broad `*:*` access. Playwright browser control
+uses a mode-`0700` private Unix endpoint, never a TCP CDP listener, while
+userspace networking can forward tailnet traffic to matching localhost TCP
+listeners even though Docker publishes no ports.
 
 The backends use `127.0.0.2:8932`, `127.0.0.2:6081`, and
 `127.0.0.2:5900`. That alias keeps them outside userspace networking's

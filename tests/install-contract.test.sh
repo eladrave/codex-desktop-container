@@ -40,8 +40,17 @@ grep -Fq 'packages+=(chrome-remote-desktop)' scripts/verify-deployment.sh
 grep -Fq 'crd_status=NOT_INSTALLED' scripts/verify-deployment.sh
 grep -Fq "pgrep -u 10001 -x Xvfb" scripts/verify-deployment.sh
 grep -Fq '"${crd_incomplete}" == 1' scripts/verify-deployment.sh
-grep -Fq 'Playwright MCP extension token is not configured.' \
-  scripts/verify-deployment.sh
+grep -Fq 'remote-browser-owner remote-browser-keeper playwright-mcp' \
+  scripts/verify-deployment.sh scripts/verify-macos.sh
+grep -Fq '127.0.0.2:8932' scripts/verify-deployment.sh scripts/verify-macos.sh
+grep -Fq 'remote-browser-functional-canary.sh' \
+  scripts/verify-deployment.sh scripts/verify-macos.sh
+if rg -n 'Playwright MCP extension token|remote-browser-extension-token' \
+  scripts/install.sh scripts/install-macos.sh scripts/verify-deployment.sh \
+  scripts/verify-macos.sh docs README.md; then
+  echo 'Install, verification, and documentation must not require a Playwright extension token.' >&2
+  exit 1
+fi
 grep -Fq 'test ! -e /run/secrets/tailscale-auth-key' scripts/verify-deployment.sh
 grep -Fq 'ss -lnt' scripts/verify-deployment.sh
 grep -Fq 'test -x /usr/bin/ss' Dockerfile

@@ -5,13 +5,14 @@ install -d -m 0755 /run/dbus /run/tailscale /var/lib/tailscale
 install -d -o codex -g codex -m 0700 /run/codex-desktop
 install -d -m 0700 /var/lib/codex-desktop-persistent
 install -d -o root -g codex -m 0750 /run/remote-browser
+install -d -o codex -g codex -m 0700 /run/remote-browser/browser
 test -d /home/codex
 # Linux installs pre-create the bind source as UID 10001. Docker Desktop uses
 # a named volume whose root is initially owned by root. Normalize only the
 # mount root so both persistence backends present the same private home.
 chown codex:codex /home/codex
 setpriv --reuid=10001 --regid=10001 --init-groups chmod 0700 /home/codex
-chrome_profile_dir=/home/codex/.config/google-chrome
+chrome_profile_dir="${CODEX_CHROME_PROFILE_DIR:-/home/codex/.config/remote-browser/chrome-profile}"
 
 machine_id_file=/var/lib/codex-desktop-persistent/machine-id
 if [[ ! -s "${machine_id_file}" ]]; then
@@ -38,11 +39,16 @@ setpriv --reuid=10001 --regid=10001 --init-groups \
   /home/codex/.config \
   /home/codex/.config/autostart \
   /home/codex/.config/remote-browser \
-  "${chrome_profile_dir}" \
   /home/codex/.local \
   /home/codex/.local/share \
   /home/codex/.vnc \
   /home/codex/Projects
+
+# Move legacy browser state before any desktop, Chrome, or MCP process starts.
+# The migration never merges two populated trees and keeps a rollback-friendly
+# compatibility symlink at Chrome's default profile path.
+CODEX_CHROME_PROFILE_DIR="${chrome_profile_dir}" \
+  /opt/codex-desktop/remote-browser/migrate-chrome-profile.sh
 
 if [[ "${CODEX_DESKTOP_CRD_ENABLED:-1}" == 1 ]]; then
   setpriv --reuid=10001 --regid=10001 --init-groups \
@@ -70,10 +76,6 @@ setpriv --reuid=10001 --regid=10001 --init-groups \
   xdg-mime default chatgpt.desktop x-scheme-handler/codex
 
 test -w "${chrome_profile_dir}"
-# Chrome can leave these process locks after an unclean container stop. At this
-# point no user session or Chrome process exists, so removing only Singleton*
-# is safe and preserves cookies, extensions, and all other authenticated state.
-rm -f -- "${chrome_profile_dir}"/Singleton*
 
 # Create gateway credentials once in the persistent machine volume. The helper
 # is deliberately silent and never places generated values in process args.

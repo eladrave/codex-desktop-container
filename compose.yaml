@@ -11,7 +11,9 @@ services:
       LOGNAME: codex
       SHELL: /bin/bash
       CODEX_HOME: /home/codex/.codex
-      CODEX_CHROME_PROFILE_DIR: /home/codex/.config/google-chrome
+      CODEX_CHROME_PROFILE_DIR: /home/codex/.config/remote-browser/chrome-profile
+      REMOTE_BROWSER_RUNTIME_DIR: /run/remote-browser/browser
+      REMOTE_BROWSER_BROWSER_ENDPOINT: /run/remote-browser/browser/endpoint.sock
       TZ: ${TZ:-Etc/UTC}
       TS_STATE_DIR: /var/lib/tailscale
       TS_HOSTNAME: ${TAILSCALE_HOSTNAME:-codex-desktop}

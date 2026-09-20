@@ -16,6 +16,7 @@ for test_script in \
   tests/container-runtime-contract.test.sh \
   tests/install-contract.test.sh \
   tests/local-session-contract.test.sh \
+  tests/mcp-keeper-contract.test.sh \
   tests/novnc-contract.test.sh \
   tests/session-handoff.test.sh \
   tests/unified-remote-browser-contract.test.sh \

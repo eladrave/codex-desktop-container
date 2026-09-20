@@ -19,7 +19,7 @@ workflow.
 
 | Target | Host GUI | Required selection | User-only browser work |
 | --- | --- | --- | --- |
-| Apple silicon macOS | The user must remain logged in for Docker Desktop and launchd; the container does not use the host display | Native ARM64, noVNC only, CRD absent, no Rosetta | Approve Tailscale on this or another trusted device, then use noVNC for Codex and extension setup |
+| Apple silicon macOS | The user must remain logged in for Docker Desktop and launchd; the container does not use the host display | Native ARM64, noVNC only, CRD absent, no Rosetta | Approve Tailscale on this or another trusted device, then use noVNC for optional Codex and `@Chrome` setup |
 | Ubuntu 24.04 AMD64 headless or graphical | Not required | noVNC-only, matched `INSTALL_CRD=0` image | Approve Tailscale on another trusted device, then use noVNC |
 | Ubuntu 24.04 AMD64 headless or graphical | Not required | CRD enabled, matched `INSTALL_CRD=1` image | Approve Tailscale on another trusted device, then complete Google's headless CRD registration before expecting noVNC to show a desktop |
 
@@ -38,7 +38,7 @@ host-specific runbook.
    macOS? For a remote Linux host, what approved SSH alias should the agent use?
 2. **Existing installation:** Is this a fresh install or an upgrade that must
    preserve the existing home, Tailscale identity, machine identity, browser
-   profile, remote-browser credentials, Playwright extension token, and Ubuntu
+   profile, remote-browser credentials, and Ubuntu
    CRD registration when present?
 3. **Container hostname:** What local container hostname should be used?
 4. **Tailscale hostname:** What stable MagicDNS/device hostname should be used?
@@ -66,9 +66,9 @@ host-specific runbook.
 14. **Codex and Chrome:** Ask the user to sign in to Codex, install the Chrome
     plugin and official extension, choose the required website permissions, and
     decide whether full CDP is truly necessary.
-15. **Playwright MCP:** Ask the user to install the Playwright extension in the
-    same persistent Chrome and enter its token only into the hidden
-    `remote-browser-extension-token` prompt.
+15. **Playwright MCP:** No browser extension or extension token is required.
+    Confirm the installer brings the MCP backend up automatically against the
+    persistent headed Chrome through its protected Unix endpoint.
 16. **Acceptance:** Ask which harmless site and scheduled-task prompt should be
     used for the final real browser test.
 
@@ -90,7 +90,11 @@ Verify:
 - repository status and exact commit;
 - existing service, container, image, and persistent-state paths;
 - no unexpected published ports;
-- no Chrome `--remote-debugging-port` argument or listener on TCP 9222;
+- no Chrome `--remote-debugging-port` argument or TCP CDP listener on any port;
+- exactly one headed Chrome using the nondefault persistent profile, with its
+  sandbox and installed extensions enabled;
+- the private browser Unix endpoint exists below
+  `/run/remote-browser/browser` and UID 10002 cannot traverse its directory;
 - only the gateway on `127.0.0.1:8443`, with MCP, noVNC, and VNC backends on
   their documented `127.0.0.2` addresses;
 - backup destination and free space.
@@ -180,19 +184,20 @@ authorization code or PIN into chat. Direct the user to:
 8. Configure full CDP only if required and accept that approval prompts may
    prevent fully unattended use.
 
-CRD-enabled mode does not start the shared Xfce display until the persistent
-CRD host configuration exists. Therefore the noVNC URL is not a substitute for
-the registration steps above. Use noVNC-only mode when Google CRD must not be a
-bootstrap dependency.
+Before CRD registration, CRD-enabled mode starts the same local Xvfb/Xfce
+fallback as noVNC-only mode. This makes authenticated noVNC and remote MCP ready
+immediately, without weakening the CRD requirement. After registration,
+restart the service or container once so the desktop-session selector switches
+to CRD; then verify CRD and noVNC show the registered persistent desktop.
 
 On Apple silicon or Ubuntu with CRD disabled, omit steps 1-4. Retrieve the
 one-click noVNC URL only in the trusted local container TTY, open it from the
 tailnet, sign in to Codex, and continue with the Chrome integration steps.
 
-For both platforms, direct the user to install the Playwright extension in the
-same Chrome profile and run `remote-browser-extension-token` in a trusted
-interactive root shell. They must paste the token only into that helper's hidden
-prompt. Never ask for the token in chat and never put it in a command argument.
+For both platforms, remote Playwright MCP is ready without a Playwright browser
+extension or token. The official ChatGPT extension remains a separate optional
+integration for Codex `@Chrome`; its site permissions and approval flow do not
+authenticate or constrain external MCP.
 
 ### Configure a distinct MCP client name
 
@@ -237,11 +242,14 @@ Then complete real workflow acceptance:
 - Codex and Chrome are running as UID 10001.
 - Chrome reports connected in Codex.
 - One harmless `@Chrome` task succeeds.
-- Remote MCP initializes, lists tools, operates the same visible Chrome, and
-  explicitly deletes its test session.
-- Container recreation preserves Tailscale, Codex, both extensions, browser
-  state, gateway credentials, extension token, and Ubuntu CRD registration when
-  present.
+- Remote MCP initializes, lists tools, snapshots the same visible Chrome, and
+  explicitly deletes its test session without changing the Chrome PID.
+- Restarting only Playwright MCP leaves the Chrome PID unchanged. Terminating
+  Chrome causes the owner to recreate the private endpoint and the MCP to
+  recover against the replacement browser.
+- Container recreation preserves Tailscale, Codex, the Chrome profile and any
+  installed extensions, browser state, gateway credentials, and Ubuntu CRD
+  registration when present.
 - One scheduled task runs with no viewer attached.
 - Docker still reports no published ports.
 
@@ -253,7 +261,7 @@ configured desktop mode, CRD/noVNC/Codex/Chrome/MCP test results, backup
 location, and any incomplete user-only step.
 
 Never include auth keys, CRD codes, PINs, browser cookies, gateway credentials,
-extension tokens, OAuth material, private profile contents, or Tailscale state
+OAuth material, private profile contents, or Tailscale state
 in the report.
 
 ## 7. Resume and recovery rules
@@ -270,5 +278,6 @@ in the report.
 - A CRD-enabled image and a noVNC-only runtime flag, or the reverse, is invalid.
   Rebuild or choose an image whose CRD label matches the configured mode.
 - Base verification may use `--allow-incomplete` only while a named user-only
-  CRD or Playwright-extension step remains. Do not report full deployment
+  CRD registration step remains. MCP itself must already be healthy and pass
+  initialize, tool listing, snapshot, and deletion. Do not report full deployment
   success until the real MCP and browser acceptance checks pass.

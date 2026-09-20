@@ -7,6 +7,8 @@ cd "${repo_dir}"
 
 grep -Fq 'exec /usr/local/sbin/run-codex-crd' run-session.sh
 grep -Fq 'exec /usr/local/sbin/run-codex-local-desktop' run-session.sh
+grep -Fq '/home/codex/.config/chrome-remote-desktop/host#*.json' run-session.sh
+grep -Fq 'fresh headless Ubuntu install must expose noVNC and MCP' run-session.sh
 grep -Fq 'Xvfb "${display}"' run-local-desktop.sh
 grep -Fq -- '-nolisten tcp' run-local-desktop.sh
 grep -Fq 'dbus-run-session -- xfce4-session' run-local-desktop.sh

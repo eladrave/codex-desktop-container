@@ -3,8 +3,8 @@
 The container is a direct, single-container replacement for the browser,
 gateway, and desktop capabilities of `remotechromemcp`. It adds a stock pinned
 Playwright MCP server to the same persistent visible Chrome used by Codex and
-noVNC. It does not start a second Chrome and does not enable Chrome's debugging
-port.
+noVNC. It does not start a second Chrome, require a Playwright browser
+extension, or enable a TCP Chrome debugging port.
 
 ## Network and process contract
 
@@ -25,27 +25,23 @@ tailnet traffic to a port can be forwarded to the same port on `127.0.0.1`.
 Putting an unauthenticated backend there would bypass the gateway. Never move
 ports 5900, 6081, or 8932 to `127.0.0.1`, a wildcard address, or IPv6.
 
-Supervisor owns `playwright-mcp` and `remote-browser-gateway` independently.
-Restarting either service must not restart Chrome, Codex, or the desktop. The
-MCP process uses stock `@playwright/mcp@0.0.82 --extension`; its extension relay
-is an internal Playwright implementation detail, not a configured Chrome CDP
-listener. Chrome must never receive `--remote-debugging-port`, and no process
-may listen on TCP 9222.
+Supervisor independently owns `remote-browser-owner`, `playwright-mcp`,
+`remote-browser-keeper`, and `remote-browser-gateway`. The owner launches one
+headed persistent Chrome with stock Playwright `launchPersistentContext`,
+extensions enabled, `chromiumSandbox: true`, and a nondefault profile at
+`/home/codex/.config/remote-browser/chrome-profile`. It binds browser control
+without a host or port, producing a Unix socket, and atomically publishes the
+stable symlink `/run/remote-browser/browser/endpoint.sock`.
 
-Upstream extension mode does create an ephemeral localhost relay and uses CDP
-internally between Playwright and the extension. That random relay is not
-Chrome's native debugging port, has no stable external address, is not routed by
-the gateway, and is not published by Docker. Removing it would require patching
-Playwright, which this implementation deliberately does not do. The enforced
-boundary here is no configured Chrome debugging listener and no TCP 9222, not a
-claim that stock Playwright contains no internal CDP transport.
-
-The lifecycle recovery once carried only by the older `remotechromemcp`
-deployment is upstream in the pinned `0.0.82` bundle. The image build verifies
-the exact upstream bundle hash and requires shared-browser invalidation after a
-disconnect, context fallback, balanced client ownership, idempotent backend
-disposal, and extension-relay shutdown. It also rejects either legacy local
-patch marker. This verification is fail-closed and does not rewrite Playwright.
+The endpoint directory is owned by `codex` with mode `0700`; UID 10002 cannot
+traverse it. Playwright MCP connects with its supported `--endpoint` option.
+Chrome must never receive `--remote-debugging-port` or a sandbox-disabling flag,
+and no process may expose CDP over TCP on any port. Restarting or deleting MCP
+sessions must not close Chrome. The keeper maintains one nonmutating MCP client
+so the shared browser remains attached and reconnects after an MCP or browser
+restart. If Chrome crashes, the owner creates a replacement endpoint and the
+keeper restores the attachment. None of these integration processes rewrites
+the pinned Playwright MCP package.
 
 Playwright MCP runs as the same `codex` user that owns Chrome and the persistent
 profile. Treat it as full desktop-user authority, not an OS isolation boundary.
@@ -115,27 +111,13 @@ docker exec -it codex-desktop-desktop-1 bash
 remote-browser-credentials
 ```
 
-## Playwright extension provisioning
+## Browser attachment
 
-The Playwright extension must be installed in the Chrome window already managed
-by this container. Provisioning is intentionally user-only:
-
-1. Open the authenticated noVNC URL and confirm the persistent Chrome is visible.
-2. Install the Playwright MCP browser extension in that Chrome profile.
-3. Obtain the extension connection token through the extension's trusted UI.
-4. In a trusted interactive root shell inside the container, run:
-
-   ```bash
-   remote-browser-extension-token
-   ```
-
-5. Paste the token only into the helper's hidden prompt.
-6. Confirm `supervisorctl status playwright-mcp` reports `RUNNING`.
-
-The helper atomically stores the token at
-`/home/codex/.config/remote-browser/extension-token`, owned by `codex` and mode
-`0600`. Never pass the token as a command argument, put it in `deploy.env`, or
-copy it into chat. The token and installed extension persist in the home volume.
+No Playwright extension provisioning is required. On every start, the browser
+owner opens the persistent headed Chrome and publishes its private Unix
+endpoint. MCP and the keeper attach automatically. A healthy deployment has the
+owner, keeper, and MCP processes running, the endpoint socket present, and the
+MCP backend listening on `127.0.0.2:8932` before any human signs into Codex.
 
 The official Codex browser extension remains separate. Install and approve it
 through Codex settings for `@Chrome` work. External Playwright MCP access does
@@ -172,7 +154,7 @@ After the client reloads its MCP configuration, confirm both named servers are
 visible. Initialize the new server, list tools, take one harmless snapshot, and
 delete the session. Restart the container and repeat the initialize/list/snapshot/delete
 sequence to verify that Tailscale identity, gateway credentials, Chrome state,
-and the Playwright extension token all persist.
+and installed extensions persist.
 
 The server injects the browser-operation playbook and the human-handoff tools
 from `remotechromemcp`. Use the handoff URL when a person must complete login,
@@ -257,7 +239,8 @@ noVNC login-cookie exchange, Basic Auth, WebSocket handling, and secret-path
 log suppression. They proxy only to the private loopback backends.
 
 For an actual replacement, the override also mounts the existing
-`/var/lib/remote-chrome/profile` directly at the unified Chrome profile path and
+`/var/lib/remote-chrome/profile` directly at the managed nondefault profile path
+`/home/codex/.config/remote-browser/chrome-profile` and
 mounts `/etc/remote-chrome/credentials.env` read-only for the root gateway
 process. The profile is not copied or reformatted, UID/GID 10001 remain the
 same, and the old one-click handoff URL remains valid. Only the validated URL is
@@ -291,7 +274,8 @@ unified container before restarting the old service against the same profile.
 Inspect the independent processes without displaying credentials:
 
 ```bash
-supervisorctl status remote-browser-gateway playwright-mcp chrome
+supervisorctl status remote-browser-owner remote-browser-keeper \
+  playwright-mcp remote-browser-gateway
 tailscale serve status
 ss -lnt
 ```
@@ -303,9 +287,8 @@ supervisorctl restart playwright-mcp
 supervisorctl restart remote-browser-gateway
 ```
 
-If the extension token has not been provisioned, the MCP process remains
-unavailable and reports an actionable error. It must not launch a second browser
-or damage the existing profile.
+If the private endpoint is missing, inspect `remote-browser-owner` before MCP.
+MCP must never launch a second browser or damage the existing profile.
 
 The normal Docker health check is non-mutating. It checks process/listener state
 but does not initialize MCP sessions, create tabs, or attach a debugger. Run a
@@ -319,8 +302,7 @@ must remain unchanged, Chrome must receive a new PID, and the persistent profile
 must remain intact. This disruptive recovery check is manual acceptance only;
 the hourly canary never restarts Chrome.
 
-After the extension token is configured and the normal verifier passes, install
-the optional hourly functional canary:
+After the normal verifier passes, install the optional hourly functional canary:
 
 ```bash
 # Ubuntu
@@ -343,8 +325,8 @@ page without navigating, clicking, or typing.
 The existing stopped-container backup flow preserves everything required by the
 unified service:
 
-- `/home/codex`, including Chrome, Codex, both browser extensions, and the
-  Playwright extension token;
+- `/home/codex`, including Chrome, Codex, the browser profile, and any installed
+  extensions;
 - `/var/lib/tailscale`, including the node identity and Serve configuration;
 - `/var/lib/codex-desktop-persistent`, including machine identity and gateway
   credentials.
@@ -362,7 +344,7 @@ MCP connectivity, and authenticated noVNC all survive.
 The older `remotechromemcp` repository includes optional GCS backup machinery.
 It is not active on the current codexgui deployment and is not duplicated here.
 This repository's supported backup is the existing quiesced full-state local
-backup, which now includes gateway credentials and the extension token. Adding
+backup, which now includes gateway credentials. Adding
 off-host GCS export remains a separate, explicitly authorized infrastructure
 task because it requires cloud credentials, bucket policy, retention, and
 restore validation.

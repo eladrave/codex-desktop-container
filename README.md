@@ -13,8 +13,9 @@ and desktop session.
 This is a single-container, in-place replacement for `remotechromemcp`. It
 preserves bearer-authenticated MCP, optional token-path compatibility, the
 browser-operation playbook, human-handoff tools, a one-click noVNC URL, and
-Basic Auth fallback. It uses stock pinned Playwright MCP in extension mode and
-does not open Chrome's debugging port.
+Basic Auth fallback. Stock pinned Playwright MCP attaches to the single headed
+Chrome through Playwright's private Unix pipe endpoint. It needs no Playwright
+browser extension or token and opens no TCP Chrome debugging port.
 
 The MCP handoff tools return the stable, bookmarkable tailnet noVNC link. When
 the user explicitly cannot use Tailscale, a separate tool can create a
@@ -70,8 +71,9 @@ prerequisites, clones one exact repository revision, and invokes the same
 the pinned native image for the detected host, asks all non-secret
 configuration questions, enrolls
 Tailscale through a hidden auth-key prompt or browser URL, configures the
-authenticated HTTPS gateway, starts the container, and prints the remaining
-platform-specific Codex and Playwright-extension steps.
+authenticated HTTPS gateway, starts the container, verifies a real MCP
+initialize/tool-list/snapshot/delete sequence, and prints any remaining
+platform-specific Codex or CRD steps.
 
 On a headless Ubuntu host, run the installer in an SSH session with a PTY. The
 browser-enrollment option prints a short-lived Tailscale login URL in that
@@ -106,7 +108,7 @@ recreation in these host directories:
 
 | Host path | Container path | Contents |
 | --- | --- | --- |
-| `/var/lib/codex-desktop/home` | `/home/codex` | Codex login and settings, Ubuntu CRD registration, Xfce settings, projects, Chrome profile, extensions, and Playwright extension token |
+| `/var/lib/codex-desktop/home` | `/home/codex` | Codex login and settings, Ubuntu CRD registration, Xfce settings, projects, the nondefault persistent Chrome profile, and installed extensions |
 | `/var/lib/codex-desktop/tailscale` | `/var/lib/tailscale` | Tailscale node identity and preferences |
 | `/var/lib/codex-desktop/machine` | `/var/lib/codex-desktop-persistent` | Stable DBus machine identity and root-only remote-browser gateway credentials |
 
@@ -130,10 +132,11 @@ and use single-instance restart wrappers for unattended work.
 The container registers Chrome as the default HTTP/HTTPS browser and Codex as
 the `codex:` callback handler so ChatGPT sign-in can complete inside the same
 persistent desktop session.
-Browser control supports both the official ChatGPT browser extension with
-Codex's approval model and stock Playwright MCP `--extension` mode. Both attach
-to the same persistent visible Chrome. This image does not pass
-`--remote-debugging-port` to Chrome and nothing listens on TCP 9222.
+Browser control supports the optional official ChatGPT browser extension with
+Codex's approval model and remote Playwright MCP. Both use the same persistent
+visible Chrome. MCP connects through a mode-`0700` private Unix endpoint; it
+does not need a Playwright browser extension. This image never configures a TCP
+CDP listener.
 
 ## Requirements
 
@@ -199,7 +202,7 @@ account and tailnet. Gateway credentials are generated silently in persistent
 root-only state and are never added to `deploy.env`.
 
 The installer does not install Docker, publish LAN/public ports, or automate
-Google, Codex, Chrome-extension, or PIN entry. It prints the ordered user-only
+Google, Codex, optional ChatGPT-extension, or PIN entry. It prints the ordered user-only
 steps for those actions. See the [complete installation guide](docs/installation.md).
 
 ## Manual installation on the host
@@ -328,20 +331,15 @@ persistent desktop:
 6. Start a test chat and use `@Chrome` for one real browser action.
 
 Install the extension in the Chrome window started by this container. Its
-profile is `/home/codex/.config/google-chrome`, so the extension, permissions,
+profile is `/home/codex/.config/remote-browser/chrome-profile`, so the extension, permissions,
 and signed-in site state survive container recreation. The matching Codex
 plugin and native-host state persist under `/home/codex`.
 
-For remote MCP, separately install the Playwright extension into this same
-Chrome profile. Obtain its token through the extension UI, then enter it only at
-the hidden prompt inside the container:
-
-```bash
-remote-browser-extension-token
-```
-
-This starts the independently supervised stock Playwright MCP service. It does
-not grant or bypass Codex `@Chrome` approvals.
+Remote MCP is already active. It needs no Playwright browser extension or
+extension token. A supervised browser owner keeps the one headed Chrome alive,
+publishes a private Unix endpoint, and lets the independently supervised stock
+Playwright MCP attach to it. External MCP authority remains separate from Codex
+`@Chrome` approvals.
 
 If a task needs console, network, DOM, or performance inspection, open
 **Settings > Browser** and enable **full CDP access**. Full CDP is elevated-risk
@@ -370,8 +368,8 @@ On Ubuntu:
 sudo /opt/services/codex-desktop/scripts/verify-deployment.sh
 ```
 
-Use `--allow-incomplete` only before the user has provisioned the Playwright
-extension token or, when enabled, completed CRD registration. The verifier
+Use `--allow-incomplete` only on Ubuntu before an enabled CRD registration is
+complete. MCP is never optional: every verifier
 reads `CODEX_DESKTOP_CRD_ENABLED`, verifies that the image label and installed
 packages match it, and does not query CRD in a noVNC-only image.
 
@@ -383,12 +381,12 @@ On Apple silicon:
 
 Finally, connect through authenticated noVNC, or Chrome Remote Desktop when it
 is enabled on Ubuntu, and confirm
-that Xfce, Codex, and Chrome open. Confirm the extension reports connected in Codex, run one
+that Xfce, Codex, and Chrome open. If using `@Chrome`, confirm the official extension reports connected in Codex and run one
 `@Chrome` action, restart the service, and repeat the action without reinstalling
 the extension or signing back into the test site. Initialize MCP through its
 bearer endpoint, list tools, take a harmless snapshot, and delete the session.
 Verify the browser action is visible in noVNC and survives a restart without
-rotating gateway credentials or reprovisioning either extension.
+rotating gateway credentials or provisioning a Playwright extension.
 
 ## Upgrades and rollback
 

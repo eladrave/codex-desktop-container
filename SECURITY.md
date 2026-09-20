@@ -2,7 +2,7 @@
 
 Do not commit Tailscale auth keys, Chrome Remote Desktop authorization codes or
 PINs, Codex authentication state, SSH private keys, browser profiles, gateway
-credentials, Playwright extension tokens, or files from any persistent state
+credentials, or files from any persistent state
 directory.
 
 The browser-enrollment `AuthURL` is a short-lived sensitive device-claim link.
@@ -12,22 +12,18 @@ documentation, shell history, or telemetry. noVNC is not required for this
 approval. After approval, report only sanitized account, MagicDNS, node-name,
 and online-state fields.
 
-Treat `/var/lib/codex-desktop/home/.config/google-chrome` as a credential
-store. It can contain cookies, local storage, installed extensions, and active
-website sessions. Full Chrome DevTools Protocol access is mediated by the Codex
-browser integration and its approval flow. Remote Playwright MCP uses its stock
-browser extension against the same visible Chrome. Do not add
-`--remote-debugging-port`, publish TCP 9222, or expose a raw debugging endpoint
-through Docker, a reverse proxy, Tailscale, or host networking.
-
-Stock Playwright extension mode creates an ephemeral localhost relay and uses
-CDP internally. It is not Chrome's native debugging port, is not routed by the
-gateway, and is not published by Docker. Eliminating that upstream relay would
-require a Playwright patch, which this repository intentionally does not carry.
-Keep the tailnet policy default-deny for every other TCP port on this node;
-grant intended clients only Tailscale SSH and HTTPS 443. Do not use a broad
-`*:*` grant, because userspace networking can forward a tailnet connection to
-a matching localhost listener, including an upstream ephemeral relay.
+Treat the persistent Chrome profile under
+`/var/lib/codex-desktop/home/.config/remote-browser/chrome-profile` as a
+credential store. It can contain cookies, local storage, installed extensions,
+and active website sessions. Full Chrome DevTools Protocol access is mediated
+by the Codex browser integration and its approval flow. Remote Playwright MCP
+controls the same visible Chrome through a private Unix endpoint created by
+Playwright's pipe transport. The endpoint directory is mode `0700`, owned by
+`codex`, and cannot be traversed by the guest-proxy UID. Do not add
+`--remote-debugging-port`, any TCP CDP listener, or expose the Unix endpoint
+through Docker, a reverse proxy, Tailscale, a bind mount, or host networking.
+Keep the tailnet policy default-deny for every other TCP port on this node and
+grant intended clients only Tailscale SSH and HTTPS 443.
 
 Tailscale Serve is the default ingress and exposes only HTTPS 443 to the
 authenticated gateway on `127.0.0.1:8443`. MCP, noVNC, and x11vnc bind to
@@ -65,10 +61,10 @@ boundary. A legacy `.vnc/passwd` may remain in persistent state but is unused.
 
 Gateway credentials live under the root-owned persistent machine-state
 directory with mode `0700` for the directory and `0600` for the file. Retrieve
-them only with the TTY-only `remote-browser-credentials` command. The
-Playwright extension token lives in the persistent home, owned by `codex` and
-mode `0600`; enter it only through the hidden
-`remote-browser-extension-token` prompt. Neither secret belongs in
+them only with the TTY-only `remote-browser-credentials` command. No Playwright
+browser-extension token exists. The official ChatGPT extension, when enabled
+for Codex `@Chrome`, remains ordinary credential-bearing browser state and is
+not used to authenticate remote MCP. Gateway secrets do not belong in
 `deploy.env`, process arguments, chat, logs, or command output captured by an
 agent.
 
@@ -91,7 +87,7 @@ success or failure. Never add an auth key to `deploy.env`, a command argument,
 Git, an image layer, chat, logs, or telemetry.
 
 Upgrade backups under `/var/backups/codex-desktop` contain credential-bearing
-Codex, Chrome, CRD, gateway, Playwright extension, and Tailscale state. Keep the
+Codex, Chrome, CRD, gateway, and Tailscale state. Keep the
 backup directory `root:root` mode `0700`, keep archives mode `0600`, encrypt copies before they
 leave the host, and delete retained backups only through a separately approved
 retention process.

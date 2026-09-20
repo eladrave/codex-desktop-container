@@ -58,6 +58,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     XDG_CACHE_HOME=/home/codex/.cache \
     XDG_DATA_HOME=/home/codex/.local/share \
     CODEX_HOME=/home/codex/.codex \
+    CODEX_CHROME_PROFILE_DIR=/home/codex/.config/remote-browser/chrome-profile \
     CODEX_DESKTOP_CHATGPT_VERSION=${CHATGPT_VERSION} \
     CODEX_DESKTOP_TAILSCALE_ARCH=${TAILSCALE_BINARY_ARCH} \
     CODEX_DESKTOP_TAILSCALE_ELF_MACHINE_HEX=${TAILSCALE_ELF_MACHINE_HEX} \
@@ -180,7 +181,6 @@ COPY run-x11vnc.sh /usr/local/sbin/run-codex-x11vnc
 COPY run-novnc.sh /usr/local/sbin/run-codex-novnc
 COPY lib/remote-browser/ /opt/codex-desktop/remote-browser/
 COPY codex-autostart.desktop /opt/codex-desktop-home-skel/.config/autostart/codex.desktop
-COPY chrome-autostart.desktop /etc/xdg/autostart/codex-chrome.desktop
 
 RUN chmod 0755 \
       /usr/local/bin/tailscale \
@@ -197,18 +197,19 @@ RUN chmod 0755 \
       /usr/local/sbin/run-codex-x11vnc \
       /usr/local/sbin/run-codex-novnc \
       /opt/codex-desktop/remote-browser/run-playwright-mcp.sh \
+      /opt/codex-desktop/remote-browser/migrate-chrome-profile.sh \
       /opt/codex-desktop/remote-browser/run-gateway.sh \
       /opt/codex-desktop/remote-browser/prepare-credentials.sh \
       /opt/codex-desktop/remote-browser/remote-browser-credentials \
-      /opt/codex-desktop/remote-browser/remote-browser-extension-token \
       /opt/codex-desktop/remote-browser/guest-access-broker.py \
       /opt/codex-desktop/remote-browser/guest-session-proxy.cjs \
+      /opt/codex-desktop/remote-browser/browser-owner.cjs \
+      /opt/codex-desktop/remote-browser/mcp-keeper.cjs \
       /etc/chrome-remote-desktop-session \
     && chmod 0644 /etc/pam.d/chrome-remote-desktop \
     && chmod 0644 \
       /etc/supervisor/conf.d/codex-desktop.conf \
       /opt/codex-desktop-home-skel/.config/autostart/codex.desktop \
-      /etc/xdg/autostart/codex-chrome.desktop \
     && install -d -o codex -g codex -m 0700 \
       /home/codex/.cache \
       /home/codex/.codex \
@@ -248,8 +249,6 @@ RUN chmod 0755 \
       /usr/share/novnc/app/ui.js \
     && ln -s /opt/codex-desktop/remote-browser/remote-browser-credentials \
       /usr/local/bin/remote-browser-credentials \
-    && ln -s /opt/codex-desktop/remote-browser/remote-browser-extension-token \
-      /usr/local/bin/remote-browser-extension-token \
     && install -d -o root -g root -m 0755 /usr/local/libexec \
     && ln -s /opt/codex-desktop/remote-browser/guest-access-broker.py \
       /usr/local/libexec/remote-browser-guest-access \
@@ -259,6 +258,10 @@ RUN chmod 0755 \
       /opt/codex-desktop/remote-browser/guest-access-broker.py \
     && node --check \
       /opt/codex-desktop/remote-browser/guest-session-proxy.cjs \
+    && node --check \
+      /opt/codex-desktop/remote-browser/browser-owner.cjs \
+    && node --check \
+      /opt/codex-desktop/remote-browser/mcp-keeper.cjs \
     && test "$(node --print 'process.arch')" = \
       "$(case "${DESKTOP_ARCH}" in amd64) echo x64 ;; arm64) echo arm64 ;; *) exit 64 ;; esac)" \
     && test "$(playwright-mcp --version)" = "Version ${PLAYWRIGHT_MCP_VERSION}" \

@@ -13,7 +13,7 @@ services:
       # existing service, and no copy or credential rotation is performed.
       - type: bind
         source: ${REMOTE_BROWSER_PROFILE_PATH:-/var/lib/remote-chrome/profile}
-        target: /home/codex/.config/google-chrome
+        target: /home/codex/.config/remote-browser/chrome-profile
       # Root-only legacy handoff data keeps the public noVNC URL stable. The
       # unprivileged MCP process receives only the validated URL via a 0440
       # runtime file, never this credential file.

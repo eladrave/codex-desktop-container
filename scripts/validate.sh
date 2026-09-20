@@ -11,7 +11,6 @@ bash -n \
   healthcheck.sh \
   lib/remote-browser/prepare-credentials.sh \
   lib/remote-browser/remote-browser-credentials \
-  lib/remote-browser/remote-browser-extension-token \
   lib/remote-browser/run-gateway.sh \
   lib/remote-browser/run-playwright-mcp.sh \
   run-session.sh \
@@ -34,6 +33,7 @@ bash -n \
   tests/container-runtime-contract.test.sh \
   tests/install-contract.test.sh \
   tests/local-session-contract.test.sh \
+  tests/mcp-keeper-contract.test.sh \
   tests/novnc-contract.test.sh \
   tests/remote-browser-gateway-contract.test.sh \
   tests/session-handoff.test.sh \
@@ -43,6 +43,8 @@ bash -n \
 sh -n bootstrap.sh
 sh -n chrome-remote-desktop-session
 node --check tests/live-guest-funnel-regression.cjs
+node --check lib/remote-browser/browser-owner.cjs
+node --check lib/remote-browser/mcp-keeper.cjs
 
 if command -v shellcheck >/dev/null 2>&1; then
   shellcheck \
@@ -53,7 +55,6 @@ if command -v shellcheck >/dev/null 2>&1; then
     healthcheck.sh \
     lib/remote-browser/prepare-credentials.sh \
     lib/remote-browser/remote-browser-credentials \
-    lib/remote-browser/remote-browser-extension-token \
     lib/remote-browser/run-gateway.sh \
     lib/remote-browser/run-playwright-mcp.sh \
     run-session.sh \
@@ -76,6 +77,7 @@ if command -v shellcheck >/dev/null 2>&1; then
     tests/container-runtime-contract.test.sh \
     tests/install-contract.test.sh \
     tests/local-session-contract.test.sh \
+    tests/mcp-keeper-contract.test.sh \
     tests/novnc-contract.test.sh \
     tests/remote-browser-gateway-contract.test.sh \
     tests/session-handoff.test.sh \

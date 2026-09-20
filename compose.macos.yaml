@@ -5,6 +5,7 @@ services:
     platform: linux/arm64
     environment:
       CODEX_DESKTOP_CRD_ENABLED: "0"
+      CODEX_CHROME_PROFILE_DIR: /home/codex/.config/remote-browser/chrome-profile
     volumes:
       - type: volume
         source: codex-home

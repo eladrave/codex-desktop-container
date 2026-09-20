@@ -5,18 +5,15 @@ install_root="${HOME}/.local/share/codex-desktop"
 source_dir="${install_root}/source"
 config_file="${install_root}/deploy.env"
 container_name=codex-desktop-desktop-1
-allow_incomplete=0
 credentials_dir=/var/lib/codex-desktop-persistent/remote-browser
 credentials_file=${credentials_dir}/credentials.env
-extension_token_file=/home/codex/.config/remote-browser/extension-token
 
 usage() {
-  echo 'Usage: verify-macos.sh [--allow-incomplete]'
+  echo 'Usage: verify-macos.sh'
 }
 
 case "${1:-}" in
   '') ;;
-  --allow-incomplete) allow_incomplete=1 ;;
   --help|-h) usage; exit 0 ;;
   *) usage >&2; exit 64 ;;
 esac
@@ -24,6 +21,21 @@ esac
 [[ "$(uname -s)" == Darwin && "$(uname -m)" == arm64 ]] || {
   echo 'This verifier supports Apple silicon macOS.' >&2
   exit 1
+}
+
+chrome_main_pid() {
+  docker exec "${container_name}" bash -c '
+    count=0
+    selected=
+    for pid in $(pgrep -u 10001 -f "user-data-dir=/home/codex/.config/remote-browser/chrome-profile" || true); do
+      command_line=$(tr "\\0" " " <"/proc/$pid/cmdline" 2>/dev/null || true)
+      [[ "$command_line" == *" --type="* ]] && continue
+      count=$((count + 1))
+      selected=$pid
+    done
+    [[ $count == 1 ]]
+    printf "%s\\n" "$selected"
+  '
 }
 
 docker info >/dev/null
@@ -87,7 +99,10 @@ docker exec "${container_name}" test -f "${credentials_file}"
 [[ "$(docker exec "${container_name}" stat -c '%u:%g:%a' "${credentials_file}")" == \
   '0:0:600' ]]
 docker exec "${container_name}" test -x /usr/local/bin/remote-browser-credentials
-docker exec "${container_name}" test -x /usr/local/bin/remote-browser-extension-token
+for program in remote-browser-owner remote-browser-keeper playwright-mcp; do
+  docker exec "${container_name}" supervisorctl status "${program}" | \
+    grep -Eq '^[^[:space:]]+[[:space:]]+RUNNING([[:space:]]|$)'
+done
 docker exec "${container_name}" supervisorctl status remote-browser-gateway | \
   grep -Eq '^[^[:space:]]+[[:space:]]+RUNNING([[:space:]]|$)'
 docker exec "${container_name}" supervisorctl status remote-browser-guest-access | \
@@ -101,7 +116,8 @@ listeners="$(docker exec "${container_name}" ss -lntH)"
 for expected_listener in \
   '127.0.0.1:8443' \
   '127.0.0.2:5900' \
-  '127.0.0.2:6081'; do
+  '127.0.0.2:6081' \
+  '127.0.0.2:8932'; do
   grep -Eq "[[:space:]]${expected_listener//./\\.}[[:space:]]" <<<"${listeners}"
 done
 if awk '$4 ~ /:9222$/ { found=1 } END { exit !found }' <<<"${listeners}"; then
@@ -119,10 +135,29 @@ if grep -Eq '(^|[[:space:]])\[[^]]+\]:(5900|6081|8932|8443|8444)([[:space:]]|$)'
   exit 1
 fi
 if docker exec "${container_name}" pgrep -af 'chrome|chromium' | \
-  grep -Eq -- '--remote-debugging-port(=|[[:space:]])'; then
-  echo 'Chrome was started with a forbidden remote debugging port.' >&2
+  grep -Eq -- '--remote-debugging-(port|address)(=|[[:space:]])'; then
+  echo 'Chrome was started with a forbidden TCP debugging endpoint.' >&2
   exit 1
 fi
+chrome_main_pid="$(chrome_main_pid)"
+chrome_command="$(docker exec "${container_name}" sh -c \
+  "tr '\\0' ' ' </proc/${chrome_main_pid}/cmdline")"
+[[ "${chrome_command}" == *'--user-data-dir=/home/codex/.config/remote-browser/chrome-profile'* ]]
+[[ "${chrome_command}" != *'--disable-extensions'* ]]
+[[ "${chrome_command}" != *'--no-sandbox'* ]]
+[[ "${chrome_command}" != *'--disable-setuid-sandbox'* ]]
+
+docker exec "${container_name}" bash -Eeuo pipefail -c '
+  runtime=/run/remote-browser/browser
+  endpoint=$runtime/endpoint.sock
+  [[ -d "$runtime" && ! -L "$runtime" ]]
+  [[ $(stat -c "%u:%g:%a" "$runtime") == 10001:10001:700 ]]
+  [[ -L "$endpoint" ]]
+  target=$(readlink -f "$endpoint")
+  [[ -n "$target" && -S "$target" ]]
+  [[ $(stat -c "%u:%g:%a" "$target") == 10001:10001:600 ]]
+  setpriv --reuid=10002 --regid=10002 --clear-groups test ! -x /run/remote-browser
+'
 
 [[ "$(docker exec "${container_name}" curl -sS -o /dev/null -w '%{http_code}' \
   http://127.0.0.1:8443/healthz)" == 200 ]]
@@ -143,32 +178,16 @@ printf 'Tailscale: %s\n' "${tailscale_summary}"
 docker exec "${container_name}" test ! -e /run/secrets/tailscale-auth-key
 
 printf 'Chrome Remote Desktop: not installed on ARM64\n'
-
-extension_configured=0
-if docker exec "${container_name}" test -s "${extension_token_file}"; then
-  [[ "$(docker exec "${container_name}" stat -c '%u:%g:%a' \
-    "${extension_token_file}")" == '10001:10001:600' ]]
+"${source_dir}/scripts/remote-browser-functional-canary.sh"
+chrome_after_canary="$(chrome_main_pid)"
+[[ "${chrome_after_canary}" == "${chrome_main_pid}" ]]
+docker exec "${container_name}" supervisorctl restart playwright-mcp >/dev/null
+for _attempt in $(seq 1 50); do
   docker exec "${container_name}" supervisorctl status playwright-mcp | \
-    grep -Eq '^[^[:space:]]+[[:space:]]+RUNNING([[:space:]]|$)'
-  grep -Eq '[[:space:]]127\.0\.0\.2:8932[[:space:]]' <<<"${listeners}"
-  extension_configured=1
-  printf 'Playwright MCP extension token: configured\n'
-else
-  docker exec "${container_name}" supervisorctl status playwright-mcp | \
-    grep -Eq '^[^[:space:]]+[[:space:]]+RUNNING([[:space:]]|$)'
-  if awk '$4 ~ /:8932$/ { found=1 } END { exit !found }' <<<"${listeners}"; then
-    echo 'MCP backend is listening before its extension token is configured.' >&2
-    exit 1
-  fi
-  printf 'Playwright MCP extension token: not configured\n'
-fi
-if [[ "${extension_configured}" == 0 && "${allow_incomplete}" == 0 ]]; then
-  echo 'Playwright MCP extension token is not configured.' >&2
-  exit 1
-fi
+    grep -Eq '^[^[:space:]]+[[:space:]]+RUNNING([[:space:]]|$)' && break
+  sleep 0.2
+done
+[[ "$(chrome_main_pid)" == "${chrome_main_pid}" ]]
+"${source_dir}/scripts/remote-browser-functional-canary.sh"
 
-if [[ "${allow_incomplete}" == 1 && "${extension_configured}" == 0 ]]; then
-  printf 'Base macOS deployment checks passed; user-only setup remains incomplete.\n'
-else
-  printf 'Codex Desktop macOS deployment verification passed.\n'
-fi
+printf 'Codex Desktop macOS deployment verification passed.\n'

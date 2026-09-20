@@ -621,7 +621,11 @@ done
 ((serve_ready == 1)) || \
   die 'Tailscale Serve did not expose the authenticated gateway within 60 seconds.'
 
-"${service_dir}/scripts/verify-deployment.sh" --allow-incomplete
+verify_arguments=()
+if [[ "${crd_enabled}" == 1 ]]; then
+  verify_arguments+=(--allow-incomplete)
+fi
+"${service_dir}/scripts/verify-deployment.sh" "${verify_arguments[@]}"
 if [[ -n "${prior_gateway_credentials_sha}" ]]; then
   current_gateway_credentials_sha="$(sha256sum "${gateway_credentials_host}" | awk '{print $1}')"
   [[ "${current_gateway_credentials_sha}" == "${prior_gateway_credentials_sha}" ]] || \
@@ -642,13 +646,11 @@ if [[ "${crd_enabled}" == 1 ]]; then
     '6. Enter the CRD PIN only at its hidden prompt.' \
     '7. Connect through Chrome Remote Desktop or authenticated noVNC; sign in to Codex.' \
     '8. In Codex Settings > Computer Use, install the Chrome plugin and official extension.' \
-    '9. In the same Chrome profile, install the Playwright MCP extension and obtain its connection token.' \
-    '10. Run remote-browser-extension-token and enter that token only at its hidden prompt.' \
-    '11. Run remote-browser-credentials only in this trusted TTY to retrieve the MCP and one-click noVNC details.' \
-    '12. Confirm Chrome shows Manage, test one @Chrome action, and test one MCP browser action.' \
-    '13. Enable Codex full CDP only if a scheduled task genuinely needs it; the remote MCP does not require it.' \
-    '14. Run sudo /opt/services/codex-desktop/scripts/verify-deployment.sh.' \
-    '15. Optional: run sudo /opt/services/codex-desktop/scripts/install-functional-canary.sh to validate and schedule the hourly MCP canary.' >/dev/tty
+    '9. Run remote-browser-credentials only in this trusted TTY to retrieve the MCP and one-click noVNC details.' \
+    '10. Confirm Chrome shows Manage and test one @Chrome action. Remote Playwright MCP is already active and needs no browser extension or token.' \
+    '11. Enable Codex full CDP only if a scheduled task genuinely needs it; the remote MCP does not require it.' \
+    '12. Run sudo /opt/services/codex-desktop/scripts/verify-deployment.sh.' \
+    '13. Optional: run sudo /opt/services/codex-desktop/scripts/install-functional-canary.sh to validate and schedule the hourly MCP canary.' >/dev/tty
 else
   printf '%s\n' \
     '' \
@@ -657,10 +659,8 @@ else
     '2. Run remote-browser-credentials only in this trusted TTY to retrieve the MCP and one-click noVNC details.' \
     '3. Open the displayed authenticated noVNC URL; sign in to Codex.' \
     '4. In Codex Settings > Computer Use, install the Chrome plugin and official extension.' \
-    '5. In the same Chrome profile, install the Playwright MCP extension and obtain its connection token.' \
-    '6. Run remote-browser-extension-token and enter that token only at its hidden prompt.' \
-    '7. Confirm Chrome shows Manage, test one @Chrome action, and test one MCP browser action.' \
-    '8. Enable Codex full CDP only if a scheduled task genuinely needs it; the remote MCP does not require it.' \
-    '9. Run sudo /opt/services/codex-desktop/scripts/verify-deployment.sh.' \
-    '10. Optional: run sudo /opt/services/codex-desktop/scripts/install-functional-canary.sh to validate and schedule the hourly MCP canary.' >/dev/tty
+    '5. Confirm Chrome shows Manage and test one @Chrome action. Remote Playwright MCP is already active and needs no browser extension or token.' \
+    '6. Enable Codex full CDP only if a scheduled task genuinely needs it; the remote MCP does not require it.' \
+    '7. Run sudo /opt/services/codex-desktop/scripts/verify-deployment.sh.' \
+    '8. Optional: run sudo /opt/services/codex-desktop/scripts/install-functional-canary.sh to validate and schedule the hourly MCP canary.' >/dev/tty
 fi

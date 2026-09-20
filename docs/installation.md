@@ -98,9 +98,9 @@ The installer asks, in order, for:
 17. Confirmation that Tailscale Serve exposes only the authenticated HTTPS
     gateway on TCP 443.
 
-It then prints the ordered user-only steps for Codex sign-in, the official
-ChatGPT extension, Playwright extension token provisioning, remote MCP
-configuration, and optional Codex full CDP access. Ubuntu prints Chrome Remote
+It then prints the ordered user-only steps for Codex sign-in, the optional
+official ChatGPT extension, remote MCP configuration, and optional Codex full
+CDP access. Ubuntu prints Chrome Remote
 Desktop registration steps only when CRD is enabled.
 
 The installer:
@@ -120,7 +120,9 @@ The installer:
 - preserves or creates independent root-only gateway credentials in the
   persistent machine-state volume;
 - configures Tailscale Serve HTTPS 443 to the authenticated gateway without
-  publishing a Docker port.
+  publishing a Docker port;
+- requires the MCP backend to listen on `127.0.0.2:8932` and completes a real
+  initialize, tool-list, snapshot, and session-delete canary.
 
 On Ubuntu it installs the committed source under `/opt/services/codex-desktop`
 and manages `codex-desktop.service`. On Apple silicon it installs under
@@ -128,10 +130,10 @@ and manages `codex-desktop.service`. On Apple silicon it installs under
 persistent state stores, and installs a per-user launch agent that starts Docker
 Desktop and the Compose project at login.
 
-If Playwright extension provisioning or enabled Ubuntu CRD setup is
-intentionally deferred, use the platform verifier with `--allow-incomplete`
-for base checks. The normal verifier requires the Playwright extension token
-and running MCP; the normal Ubuntu verifier requires CRD only when configured.
+No Playwright browser extension or token is required. Remote MCP must be
+healthy before either installer succeeds. On Ubuntu only, use
+`--allow-incomplete` while an enabled CRD registration is intentionally
+deferred; this never relaxes MCP or browser-control validation.
 
 ## Ubuntu noVNC-only mode
 
@@ -295,29 +297,25 @@ sign-in button open Chrome and return the completed login to the app.
    internals. Full CDP is elevated-risk and may require approval during use.
 
 The Chrome profile persists under
-`/var/lib/codex-desktop/home/.config/google-chrome`.
+`/var/lib/codex-desktop/home/.config/remote-browser/chrome-profile`. This
+nondefault path is required for Playwright's private debugging-pipe ownership.
 
-## Provision Playwright MCP
+## Use Playwright MCP
 
-The external MCP server uses stock pinned Playwright MCP in extension mode. It
-does not use Chrome's debugging port.
+The external server uses stock pinned Playwright MCP without a Playwright
+browser extension. A supervised owner launches the single persistent headed
+Chrome through Playwright's private pipe transport and publishes a Unix socket
+symlink at `/run/remote-browser/browser/endpoint.sock`. The mode-`0700`
+directory is accessible only to `codex`; the guest proxy cannot traverse it.
+The independently supervised MCP connects with `--endpoint` and listens only on
+`127.0.0.2:8932`. No TCP CDP listener exists.
 
-1. In the same persistent Chrome, install the Playwright MCP extension.
-2. Obtain its connection token through the extension's trusted UI.
-3. In a trusted interactive root shell inside the container, run:
-
-   ```bash
-   remote-browser-extension-token
-   ```
-
-4. Paste the token only into the helper's hidden prompt.
-5. Confirm `supervisorctl status playwright-mcp` reports `RUNNING`.
-6. Run `remote-browser-credentials` locally in that TTY and configure the MCP
-   client with the displayed HTTPS URL and bearer token.
-
-Do not put either token in `deploy.env`, a command argument, chat, logs, or a
-saved shell command. Prefer bearer authentication. Use the token-path MCP URL
-only for clients that cannot set headers. See
+Confirm `remote-browser-owner`, `remote-browser-keeper`, and `playwright-mcp`
+are `RUNNING`. Then run `remote-browser-credentials` locally in a trusted TTY
+and configure the MCP client with the displayed HTTPS URL and bearer token.
+Do not put the gateway token in `deploy.env`, a command argument, chat, logs,
+or a saved shell command. Prefer bearer authentication. Use the token-path MCP
+URL only for clients that cannot set headers. See
 [Remote browser MCP](remote-browser-mcp.md) for routes and recovery.
 
 ### Name and configure the MCP client
@@ -372,8 +370,11 @@ Then perform the interactive acceptance checks:
    macOS.
 4. Initialize a remote MCP session, list tools, take a harmless snapshot, and
    explicitly delete the session. Confirm the action is visible through noVNC.
-5. Confirm Tailscale identity and Serve route, Codex sign-in, both Chrome
-   extensions, cookies, gateway credentials, and extension token all survive.
+5. Confirm Tailscale identity and Serve route, Codex sign-in, the Chrome
+   profile and any installed extensions, cookies, and gateway credentials all
+   survive. MCP session deletion and MCP-only restart must leave the Chrome PID
+   unchanged; a deliberate Chrome crash must recreate the Unix endpoint and
+   recover MCP against the replacement Chrome.
 6. When Ubuntu CRD is enabled, confirm its registration also survives.
 7. Trigger one scheduled task without leaving a remote viewer attached.
 
@@ -385,12 +386,12 @@ Then perform the interactive acceptance checks:
 | SSH disconnected while the installer waited | Reconnect with a PTY, inspect only sanitized container health and Tailscale status, then rerun the installer. Its base deployment and persistent volumes are designed to survive an incomplete enrollment. |
 | Wrong Tailscale account or tailnet was selected | Stop. The installer preserves the observed identity for investigation and refuses to claim success. Switching or logging out changes access and requires explicit operator approval; do not do it automatically. |
 | Tailscale is running but Serve 443 is absent | Check `tailscale status`, `tailscale serve status`, MagicDNS, HTTPS availability, and tailnet ACLs. Fix the prerequisite, then rerun the same installer or restart only the gateway. Do not publish a Docker port as a workaround. |
-| CRD mode has no visible noVNC desktop | Complete CRD registration first, or reinstall with a matched `INSTALL_CRD=0` noVNC-only image. Do not flip only the runtime flag. |
-| Playwright MCP does not listen on 8932 | Provision the extension token through `remote-browser-extension-token`, then inspect only the supervised MCP status. Do not start a second Chrome or enable TCP 9222. |
+| CRD mode remains on the local fallback after registration | Restart the service or container once so the desktop selector detects the persistent CRD host configuration, then verify CRD and noVNC. Do not flip only the runtime flag. |
+| Playwright MCP does not listen on 8932 | Inspect `remote-browser-owner`, the protected Unix endpoint, `remote-browser-keeper`, and `playwright-mcp` in that order. Do not start a second Chrome or enable a TCP debugging port. |
 
 For upgrades or partial reruns, preserve home, Tailscale, and machine state as
-one set. Use `--allow-incomplete` only to validate the base deployment while a
-documented user-only step remains.
+one set. Use `--allow-incomplete` only on Ubuntu while enabled CRD registration
+remains; MCP must still pass full functional validation.
 
 ## Upgrade and rollback
 

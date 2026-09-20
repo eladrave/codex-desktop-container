@@ -31,10 +31,6 @@ esac
   fail 'the installed MCP regression client is unavailable'
 docker inspect "${container_name}" --format '{{.State.Running}}' 2>/dev/null | \
   grep -Fqx true || fail 'the Codex Desktop container is not running'
-docker exec "${container_name}" test -s \
-  /home/codex/.config/remote-browser/extension-token || \
-  fail 'the Playwright extension token is not configured'
-
 lock_dir="${TMPDIR:-/tmp}/codex-desktop-mcp-canary.lock"
 if ! mkdir "${lock_dir}" 2>/dev/null; then
   printf 'Remote browser functional canary skipped: another run is active.\n'
