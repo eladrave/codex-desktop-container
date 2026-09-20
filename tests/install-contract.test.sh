@@ -52,6 +52,8 @@ if rg -n 'Playwright MCP extension token|remote-browser-extension-token' \
   exit 1
 fi
 grep -Fq 'test ! -e /run/secrets/tailscale-auth-key' scripts/verify-deployment.sh
+grep -Fq "printf '\\nvoid main();\\n'" \
+  scripts/remote-browser-functional-canary.sh
 grep -Fq 'ss -lnt' scripts/verify-deployment.sh
 grep -Fq 'test -x /usr/bin/ss' Dockerfile
 grep -Fq 'xdg-mime default google-chrome.desktop' entrypoint.sh

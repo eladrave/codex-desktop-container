@@ -68,7 +68,7 @@ command. Never run that command through an agent or capture its output.
 stable tailnet link. Temporary public guest access is a separate, explicit
 operation: call `create_temporary_novnc_link` only when the user states that
 Tailscale is unavailable. It creates a guest-only foreground Funnel on HTTPS
-8443 with a single-use link and a fixed 30-minute deadline. It must never expose
+10000 with a single-use link and a fixed 30-minute deadline. It must never expose
 MCP, the permanent login route, or Basic Auth. Call
 `revoke_temporary_novnc_link` when the user finishes. Never create Funnel access
 proactively for ordinary login, MFA, CAPTCHA, or convenience.

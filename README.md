@@ -20,7 +20,7 @@ browser extension or token and opens no TCP Chrome debugging port.
 The MCP handoff tools return the stable, bookmarkable tailnet noVNC link. When
 the user explicitly cannot use Tailscale, a separate tool can create a
 single-use public guest link with a fixed 30-minute maximum lifetime. That
-temporary Funnel exposes only a dedicated noVNC proxy on HTTPS 8443; it never
+temporary Funnel exposes only a dedicated noVNC proxy on HTTPS 10000; it never
 publishes MCP or the permanent gateway and can be revoked immediately.
 
 The default is Tailscale-only. An explicit `compose.codexgui.yaml` override

@@ -79,9 +79,9 @@ def status():
     if read_state().get("active"):
         return {{"Foreground": {{
             "test-session": {{
-                "TCP": {{"8443": {{"HTTPS": True}}}},
-                "Web": {{"device.example.ts.net:8443": {{"Handlers": {{"/": {{"Proxy": "http://127.0.0.1:8444"}}}}}}}},
-                "AllowFunnel": {{"device.example.ts.net:8443": True}}
+                "TCP": {{"10000": {{"HTTPS": True}}}},
+                "Web": {{"device.example.ts.net:10000": {{"Handlers": {{"/": {{"Proxy": "http://127.0.0.1:8444"}}}}}}}},
+                "AllowFunnel": {{"device.example.ts.net:10000": True}}
             }}
         }}}}
     return {{}}
@@ -92,10 +92,10 @@ if len(args) >= 3 and args[1:4] == ["funnel", "status", "--json"]:
     print(json.dumps(status()))
     raise SystemExit(0)
 if len(args) >= 3 and args[1:3] == ["debug", "netmap"]:
-    funnel = ["https://device.example.ts.net:8443"] if read_state().get("active") else None
+    funnel = ["https://device.example.ts.net:10000"] if read_state().get("active") else None
     print(json.dumps({{"SelfNode": {{"Funnel": funnel}}}}))
     raise SystemExit(0)
-if "funnel" in args and "--https=8443" in args:
+if "funnel" in args and "--https=10000" in args:
     if fail_funnel:
         raise SystemExit(2)
     write_state(True)
@@ -183,11 +183,11 @@ class GuestAccessBrokerTests(unittest.TestCase):
         response = instance.handle_request({"action": "create"})
         self.assertTrue(response["ok"])
         self.assertEqual(response["state"], "ISSUED")
-        self.assertRegex(response["guestUrl"], r"^https://device\.example\.ts\.net:8443/guest/\?token=[A-Za-z0-9_-]{40,}$")
+        self.assertRegex(response["guestUrl"], r"^https://device\.example\.ts\.net:10000/guest/\?token=[A-Za-z0-9_-]{40,}$")
 
         config = json.loads(fixture.config.read_text(encoding="utf-8"))
         self.assertNotEqual(config["linkToken"], config["sessionToken"])
-        self.assertEqual(config["publicOrigin"], "https://device.example.ts.net:8443")
+        self.assertEqual(config["publicOrigin"], "https://device.example.ts.net:10000")
         self.assertEqual(config["listenHost"], "127.0.0.1")
         self.assertEqual(config["listenPort"], 8444)
         self.assertEqual(config["upstreamHost"], "127.0.0.2")
@@ -195,7 +195,7 @@ class GuestAccessBrokerTests(unittest.TestCase):
 
         calls = fixture.calls()
         self.assertIn(
-            ["tailscale", "--socket=/run/tailscale/tailscaled.sock", "funnel", "--yes", "--https=8443", "http://127.0.0.1:8444"],
+            ["tailscale", "--socket=/run/tailscale/tailscaled.sock", "funnel", "--yes", "--https=10000", "http://127.0.0.1:8444"],
             calls,
         )
         self.assertIn(
@@ -209,7 +209,7 @@ class GuestAccessBrokerTests(unittest.TestCase):
             [
                 "setpriv", "--pdeathsig", "TERM", str(fixture.tailscale),
                 "--socket=/run/tailscale/tailscaled.sock", "funnel", "--yes",
-                "--https=8443", "http://127.0.0.1:8444",
+                "--https=10000", "http://127.0.0.1:8444",
             ],
             calls,
         )
@@ -243,15 +243,15 @@ class GuestAccessBrokerTests(unittest.TestCase):
     def test_funnel_verification_does_not_combine_separate_configs(self) -> None:
         split = {
             "Foreground": {
-                "tcp": {"TCP": {"8443": {"HTTPS": True}}},
+                "tcp": {"TCP": {"10000": {"HTTPS": True}}},
                 "web": {
                     "Web": {
-                        "device.example.ts.net:8443": {
+                        "device.example.ts.net:10000": {
                             "Handlers": {"/": {"Proxy": "http://127.0.0.1:8444"}}
                         }
                     }
                 },
-                "allow": {"AllowFunnel": {"device.example.ts.net:8443": True}},
+                "allow": {"AllowFunnel": {"device.example.ts.net:10000": True}},
             }
         }
         self.assertFalse(broker_module._exact_funnel_config(split, "device.example.ts.net"))
@@ -302,7 +302,7 @@ class GuestAccessBrokerTests(unittest.TestCase):
         self.assertNotIn("guestUrl", response)
         self.assertEqual(response["state"], "CLOSED")
 
-    def test_stale_8443_blocks_without_reset(self) -> None:
+    def test_stale_10000_blocks_without_reset(self) -> None:
         fixture = Fixture(self.directory, stale=True)
         instance = self.make_broker(fixture)
         self.assertEqual(instance._status_response()["state"], "BLOCKED")

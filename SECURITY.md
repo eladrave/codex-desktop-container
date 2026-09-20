@@ -34,7 +34,7 @@ Do not change these backends to `127.0.0.1`, a wildcard address, or IPv6. Do
 not publish any of these ports through Docker.
 
 Temporary guest access is the only supported public ingress. It uses a
-foreground Tailscale Funnel on external HTTPS 8443 and a separate guest-only
+foreground Tailscale Funnel on external HTTPS 10000 and a separate guest-only
 proxy on `127.0.0.1:8444`; it never funnels the permanent gateway on 8443.
 The guest proxy has no MCP, permanent-login, Basic Auth, generic proxy, or
 health route. A 256-bit link token is redeemed at most once for a distinct

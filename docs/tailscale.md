@@ -215,13 +215,13 @@ unsafe and stop it before accepting traffic.
 The permanent noVNC link remains private behind Tailscale Serve HTTPS 443. If
 the user explicitly needs access from a guest machine that cannot run
 Tailscale, the MCP tool `create_temporary_novnc_link` starts a separate
-foreground Funnel on HTTPS 8443. It targets only the guest proxy on
+foreground Funnel on HTTPS 10000. It targets only the guest proxy on
 `127.0.0.1:8444`; it never exposes the permanent gateway, MCP, Basic Auth, or
 the permanent login token.
 
 The guest link may be redeemed once and the resulting guest session ends at the
 original 30-minute deadline. `revoke_temporary_novnc_link` closes it earlier.
-Serve 443 and Funnel 8443 use different ports and can coexist. Do not manually
+Serve 443 and Funnel 10000 use different ports and can coexist. Do not manually
 move Funnel to 443, run it with `--bg`, or use `tailscale funnel reset`.
 
 Funnel requires MagicDNS, HTTPS, and the Funnel node capability. The broker

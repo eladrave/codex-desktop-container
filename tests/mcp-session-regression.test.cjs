@@ -16,6 +16,7 @@ const {
 const TOKEN = 'regression-bearer-that-must-never-be-logged';
 const SESSION = 'fixture-session-id';
 const MARKER = 'CODEX_UNIFIED_MCP_READY';
+const CLICKED_MARKER = 'CODEX_UNIFIED_MCP_CLICKED';
 
 function rpc(id, result) {
   return { jsonrpc: '2.0', id, result };
@@ -58,6 +59,7 @@ async function close(server) {
 test('keeps one stock MCP session across browser calls, wait, and deletion', async () => {
   const requests = [];
   let deleted = false;
+  let clicked = false;
   const tools = [
     {
       name: 'browser_navigate',
@@ -65,6 +67,10 @@ test('keeps one stock MCP session across browser calls, wait, and deletion', asy
     },
     {
       name: 'browser_snapshot',
+      inputSchema: { type: 'object', properties: {} },
+    },
+    {
+      name: 'browser_click',
       inputSchema: { type: 'object', properties: {} },
     },
     {
@@ -132,9 +138,20 @@ test('keeps one stock MCP session across browser calls, wait, and deletion', asy
         }));
         return;
       }
+      if (payload.params.name === 'browser_click') {
+        assert.equal(payload.params.arguments.element, 'Activate unified MCP probe');
+        assert.equal(payload.params.arguments.target, 'probe-button');
+        clicked = true;
+        sendJson(response, 200, rpc(payload.id, {
+          content: [{ type: 'text', text: 'clicked' }],
+        }));
+        return;
+      }
       assert.equal(payload.params.name, 'browser_snapshot');
       sendSse(response, rpc(payload.id, {
-        content: [{ type: 'text', text: `- main: ${MARKER}` }],
+        content: [{ type: 'text', text: clicked
+          ? `- main: ${CLICKED_MARKER}`
+          : `- main: ${MARKER}\n- button "Activate unified MCP probe" [ref=probe-button]` }],
       }));
     } catch (error) {
       response.destroy(error);
@@ -150,10 +167,12 @@ test('keeps one stock MCP session across browser calls, wait, and deletion', asy
       timeoutMs: 1000,
     });
     assert.deepEqual(result, {
-      browserCalls: 3,
+      browserCalls: 5,
       deletionVerified: true,
       waitMs: 5,
       snapshotOnly: false,
+      handoffVerified: false,
+      guestVerified: false,
     });
     assert.deepEqual(
       requests.map(({ method, rpcMethod }) => [method, rpcMethod]),
@@ -161,6 +180,8 @@ test('keeps one stock MCP session across browser calls, wait, and deletion', asy
         ['POST', 'initialize'],
         ['POST', 'notifications/initialized'],
         ['POST', 'tools/list'],
+        ['POST', 'tools/call'],
+        ['POST', 'tools/call'],
         ['POST', 'tools/call'],
         ['POST', 'tools/call'],
         ['POST', 'tools/call'],
@@ -181,6 +202,7 @@ test('snapshot-only canary never navigates or mutates the page', async () => {
   const tools = [
     { name: 'browser_navigate', inputSchema: { type: 'object', properties: {} } },
     { name: 'browser_snapshot', inputSchema: { type: 'object', properties: {} } },
+    { name: 'browser_click', inputSchema: { type: 'object', properties: {} } },
     { name: 'remote_chrome_request_human_intervention', inputSchema: { type: 'object', properties: {} } },
     { name: 'get_novnc_link', inputSchema: { type: 'object', properties: {} } },
     { name: 'create_temporary_novnc_link', inputSchema: { type: 'object', properties: {} } },
@@ -231,6 +253,8 @@ test('snapshot-only canary never navigates or mutates the page', async () => {
       deletionVerified: true,
       waitMs: 0,
       snapshotOnly: true,
+      handoffVerified: false,
+      guestVerified: false,
     });
     assert.equal(methods.includes('browser_navigate'), false);
     assert.deepEqual(methods, [
@@ -253,11 +277,15 @@ test('accepts canonical and token-path endpoints without exposing credentials', 
     '--wait-seconds', '0.125',
     '--timeout-seconds', '3',
     '--snapshot-only',
+    '--exercise-handoff',
+    '--exercise-guest',
   ]);
   assert.equal(parsed.waitMs, 125);
   assert.equal(parsed.timeoutMs, 3000);
   assert.equal(parsed.bearerTokenFile, '/private/token');
   assert.equal(parsed.snapshotOnly, true);
+  assert.equal(parsed.exerciseHandoff, true);
+  assert.equal(parsed.exerciseGuest, true);
   assert.equal(
     validateEndpoint(parsed.endpoint).pathname,
     '/compatibility-token/mcp',

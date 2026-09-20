@@ -178,7 +178,7 @@ async function assertFunnelClosed(container) {
   ]);
   const status = JSON.parse(output);
   const serialized = JSON.stringify(status);
-  if (serialized.includes('8443'))
+  if (serialized.includes('10000'))
     throw new Error('cleanup');
 }
 
@@ -194,7 +194,7 @@ async function main() {
     stage = 'validate';
     const guest = new URL(created.guestUrl);
     const token = guest.searchParams.get('token') || '';
-    if (guest.protocol !== 'https:' || guest.port !== '8443' ||
+    if (guest.protocol !== 'https:' || guest.port !== '10000' ||
         guest.pathname !== '/guest/' ||
         !/^[A-Za-z0-9_-]{43,128}$/.test(token)) {
       throw new Error('validate');
@@ -271,7 +271,11 @@ async function main() {
     const code = typeof error?.code === 'string' && /^[A-Z0-9_]+$/.test(error.code)
       ? error.code
       : 'ERROR';
-    process.stderr.write(`FAIL: public guest regression stage ${stage} (${code})\n`);
+    const knownReason = new Set(['timeout', 'socket hang up', 'upgrade']);
+    const reason = knownReason.has(error?.message) ? `, ${error.message}` : '';
+    process.stderr.write(
+      `FAIL: public guest regression stage ${stage} (${code}${reason})\n`,
+    );
     process.exitCode = 1;
   } finally {
     if (created?.ok)

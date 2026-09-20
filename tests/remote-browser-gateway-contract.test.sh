@@ -167,7 +167,7 @@ require_literal "${guest_broker}" 'SO_PEERCRED' \
   'the root broker must verify Unix peer credentials'
 require_literal "${guest_broker}" 'PRODUCTION_TTL = 1800.0' \
   'guest access must have a fixed 30-minute production deadline'
-require_literal "${guest_broker}" 'GUEST_PORT = 8443' \
+require_literal "${guest_broker}" 'GUEST_PORT = 10000' \
   'Funnel must use the dedicated external guest port'
 require_literal "${guest_broker}" 'PROXY_PORT = 8444' \
   'Funnel must target the dedicated local guest proxy'

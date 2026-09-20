@@ -57,9 +57,14 @@ docker exec "${container_name}" sh -eu -c '
   test -s "$token_file"
 ' sh "${credential_file}" "${token_file}"
 
-docker exec -i "${container_name}" node - \
+{
+  cat "${regression_script}"
+  # `node -` does not set require.main, so the script's ordinary CLI guard is
+  # false when streamed into the container. Invoke main explicitly in the same
+  # module after loading the exact installed source.
+  printf '\nvoid main();\n'
+} | docker exec -i "${container_name}" node - \
   --endpoint "${endpoint}" \
   --bearer-token-file "${token_file}" \
   --snapshot-only \
-  --timeout-seconds 60 \
-  <"${regression_script}"
+  --timeout-seconds 60

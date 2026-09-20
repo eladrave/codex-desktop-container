@@ -8,6 +8,7 @@ const https = require('node:https');
 const PROTOCOL_VERSION = '2025-06-18';
 const MAX_RESPONSE_BYTES = 4 * 1024 * 1024;
 const READY_MARKER = 'CODEX_UNIFIED_MCP_READY';
+const CLICKED_MARKER = 'CODEX_UNIFIED_MCP_CLICKED';
 const BUTTON_NAME = 'Activate unified MCP probe';
 
 class RegressionError extends Error {
@@ -27,6 +28,8 @@ function usage() {
     '  --wait-seconds NUMBER     Idle wait inside the same MCP session (default: 35)',
     '  --timeout-seconds NUMBER  Per-request timeout (default: 60)',
     '  --snapshot-only           Run a read-only snapshot canary instead of navigation',
+    '  --exercise-handoff        Invoke and validate both permanent noVNC handoff tools',
+    '  --exercise-guest          Create, validate, and immediately revoke temporary guest access',
     '  --insecure                Disable TLS verification for loopback only',
     '  --help                    Show this help',
     '',
@@ -58,6 +61,15 @@ function parseArgs(argv) {
     }
     if (option === '--snapshot-only') {
       result.snapshotOnly = true;
+      continue;
+    }
+    if (option === '--exercise-handoff') {
+      result.exerciseHandoff = true;
+      continue;
+    }
+    if (option === '--exercise-guest') {
+      result.exerciseHandoff = true;
+      result.exerciseGuest = true;
       continue;
     }
     const value = argv[index + 1];
@@ -200,6 +212,47 @@ function resultText(result, toolName) {
     .join('\n');
 }
 
+function urlsInText(text) {
+  return String(text).split(/\s+/).flatMap(candidate => {
+    if (!candidate.startsWith('https://'))
+      return [];
+    try {
+      return [new URL(candidate)];
+    } catch {
+      return [];
+    }
+  });
+}
+
+function validateTokenUrl(url, expectedPath, expectedPort = '') {
+  const keys = [...url.searchParams.keys()];
+  const token = url.searchParams.get('token') || '';
+  if (url.protocol !== 'https:' || !url.hostname || url.port !== expectedPort ||
+      url.pathname !== expectedPath || url.username || url.password || url.hash ||
+      keys.length !== 1 || keys[0] !== 'token' ||
+      !/^[A-Za-z0-9_-]{32,128}$/.test(token)) {
+    throw new RegressionError('handoff tool returned an invalid protected URL');
+  }
+  return url.href;
+}
+
+function stableHandoffUrl(text) {
+  const candidate = urlsInText(text)
+    .find(url => url.pathname === '/login/' && url.port === '');
+  if (!candidate)
+    throw new RegressionError('handoff tool omitted the permanent noVNC URL');
+  return validateTokenUrl(candidate, '/login/');
+}
+
+function guestHandoffUrl(text, stableUrl) {
+  const stable = new URL(stableUrl);
+  const candidate = urlsInText(text)
+    .find(url => url.pathname === '/guest/' && url.port === '10000');
+  if (!candidate || candidate.hostname !== stable.hostname)
+    throw new RegressionError('temporary handoff tool omitted the matching guest URL');
+  return validateTokenUrl(candidate, '/guest/', '10000');
+}
+
 async function runRegression(configuration) {
   const endpoint = validateEndpoint(configuration.endpoint, configuration.insecure);
   const bearerToken = configuration.bearerToken ||
@@ -265,6 +318,7 @@ async function runRegression(configuration) {
     for (const required of [
       'browser_navigate',
       'browser_snapshot',
+      'browser_click',
       'remote_chrome_request_human_intervention',
       'get_novnc_link',
       'create_temporary_novnc_link',
@@ -282,6 +336,37 @@ async function runRegression(configuration) {
       const properties = byName.get(handoff).inputSchema?.properties || {};
       if (Object.keys(properties).length !== 0)
         throw new RegressionError(`${handoff} unexpectedly accepts arguments`);
+    }
+
+    let stableUrl;
+    let guestVerified = false;
+    if (configuration.exerciseHandoff) {
+      const primary = resultText(await call('tools/call', {
+        name: 'remote_chrome_request_human_intervention', arguments: {},
+      }), 'remote_chrome_request_human_intervention');
+      const alias = resultText(await call('tools/call', {
+        name: 'get_novnc_link', arguments: {},
+      }), 'get_novnc_link');
+      stableUrl = stableHandoffUrl(primary);
+      if (stableHandoffUrl(alias) !== stableUrl)
+        throw new RegressionError('permanent handoff tools returned different URLs');
+    }
+    if (configuration.exerciseGuest) {
+      try {
+        const created = resultText(await call('tools/call', {
+          name: 'create_temporary_novnc_link', arguments: {},
+        }), 'create_temporary_novnc_link');
+        if (stableHandoffUrl(created) !== stableUrl)
+          throw new RegressionError('temporary handoff changed the permanent URL');
+        guestHandoffUrl(created, stableUrl);
+        guestVerified = true;
+      } finally {
+        const revoked = resultText(await call('tools/call', {
+          name: 'revoke_temporary_novnc_link', arguments: {},
+        }), 'revoke_temporary_novnc_link');
+        if (!revoked.includes('is closed'))
+          throw new RegressionError('temporary handoff revocation was not confirmed');
+      }
     }
 
     if (configuration.snapshotOnly) {
@@ -303,12 +388,20 @@ async function runRegression(configuration) {
       });
       if (afterDelete.status !== 404)
         throw new RegressionError(`deleted session returned HTTP ${afterDelete.status}, expected 404`);
-      return { browserCalls: 1, deletionVerified: true, waitMs: 0, snapshotOnly: true };
+      return {
+        browserCalls: 1,
+        deletionVerified: true,
+        waitMs: 0,
+        snapshotOnly: true,
+        handoffVerified: Boolean(stableUrl),
+        guestVerified,
+      };
     }
 
     const page = encodeURIComponent(
       `<!doctype html><title>Unified MCP probe</title><main>${READY_MARKER}</main>` +
-      `<button>${BUTTON_NAME}</button>`,
+      `<button onclick="document.querySelector('main').textContent='${CLICKED_MARKER}'">` +
+      `${BUTTON_NAME}</button>`,
     );
     await call('tools/call', {
       name: 'browser_navigate',
@@ -328,6 +421,22 @@ async function runRegression(configuration) {
     if (!after.includes(READY_MARKER))
       throw new RegressionError('session lost the visible probe page during the idle wait');
 
+    const escapedButtonName = BUTTON_NAME.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const buttonMatch = after.match(
+      new RegExp(`button "${escapedButtonName}" \\[ref=([^\\]]+)\\]`),
+    );
+    if (!buttonMatch)
+      throw new RegressionError('snapshot omitted the probe button reference');
+    resultText(await call('tools/call', {
+      name: 'browser_click',
+      arguments: { element: BUTTON_NAME, target: buttonMatch[1] },
+    }), 'browser_click');
+    const clicked = resultText(await call('tools/call', {
+      name: 'browser_snapshot', arguments: {},
+    }), 'browser_snapshot');
+    if (!clicked.includes(CLICKED_MARKER))
+      throw new RegressionError('browser click did not update the visible probe page');
+
     const deletion = await request(endpoint, {
       ...options,
       method: 'DELETE',
@@ -344,7 +453,14 @@ async function runRegression(configuration) {
     if (afterDelete.status !== 404)
       throw new RegressionError(`deleted session returned HTTP ${afterDelete.status}, expected 404`);
 
-    return { browserCalls: 3, deletionVerified: true, waitMs, snapshotOnly: false };
+    return {
+      browserCalls: 5,
+      deletionVerified: true,
+      waitMs,
+      snapshotOnly: false,
+      handoffVerified: Boolean(stableUrl),
+      guestVerified,
+    };
   } finally {
     if (sessionId && !deleted) {
       await request(endpoint, { ...options, method: 'DELETE', sessionId })

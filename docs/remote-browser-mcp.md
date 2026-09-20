@@ -173,7 +173,7 @@ When the user explicitly says the current machine cannot use Tailscale, call
 `create_temporary_novnc_link`. It accepts no arguments and returns two links:
 
 - the unchanged permanent tailnet-only link;
-- a new public guest link on Funnel HTTPS 8443.
+- a new public guest link on Funnel HTTPS 10000.
 
 The guest link is password-equivalent. Its token is independent from every
 persistent credential, may be redeemed exactly once, and is exchanged through
@@ -184,7 +184,7 @@ proxy authenticates every asset and WebSocket request, serves only noVNC, and
 cannot route MCP, permanent login, Basic Auth, or arbitrary upstreams.
 
 The guest Funnel is a foreground, session-bound Tailscale configuration on
-external port 8443. Private Serve remains on 443. The Funnel targets a separate
+external port 10000. Private Serve remains on 443. The Funnel targets a separate
 unprivileged guest proxy on `127.0.0.1:8444`, never the permanent gateway on
 8443. On expiry, revocation, proxy failure, broker failure, or container stop,
 the implementation destroys open HTTP/WebSocket connections and terminates the
