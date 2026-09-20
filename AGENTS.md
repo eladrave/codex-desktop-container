@@ -6,6 +6,14 @@ Before installing, upgrading, recovering, or operating this service, read
 `docs/agent-deployment.md`, `docs/installation.md`, `docs/tailscale.md`,
 `docs/remote-browser-mcp.md`, and `SECURITY.md` completely.
 
+Supported installation targets are exactly Apple silicon macOS with native
+ARM64 Docker Desktop, and Ubuntu 24.04 AMD64 with local Docker Engine,
+systemd, and AppArmor. Ubuntu may use either CRD plus noVNC or a CRD-free
+noVNC-only mode; both work on a host with no graphical environment. Treat
+Intel macOS, Linux ARM64, other Linux distributions, Windows/WSL, rootless or
+remote Docker, non-AppArmor Linux, and serverless container platforms as
+unsupported unless the user explicitly authorizes separate platform work.
+
 Do not deploy merely because repository work was requested. Deployment requires
 an explicit current request naming or clearly identifying the target host.
 
@@ -24,6 +32,15 @@ command arguments. The short-lived CRD authorization code is the unavoidable exc
 Google's registration tool receives it in process arguments, so run that command
 with shell history disabled and never copy the code into chat, logs, commits, or
 reports.
+
+Installation must run in a trusted interactive TTY. For a remote headless host,
+use an approved SSH connection with PTY allocation and keep the installer
+attached. Browser-based Tailscale enrollment does not require a browser on the
+host: hand the short-lived login URL directly to the user, who may open it on a
+different trusted computer or phone. Do not put that URL in logs, tickets, or a
+durable transcript. Wait for approval, verify the sanitized account, MagicDNS
+suffix, and node name, and only then continue to noVNC or CRD setup. noVNC is
+not used to enroll Tailscale.
 
 Preserve the persistent home, Tailscale state, machine identity, Chrome profile,
 remote-browser gateway credentials, Playwright extension token, and Ubuntu CRD
@@ -61,4 +78,7 @@ mode on both platforms; do not add `/dev/net/tun`, `NET_ADMIN`, or `NET_RAW`.
 Use `scripts/verify-macos.sh` for macOS acceptance.
 
 Apple silicon must use the native ARM64 image and must not install Chrome Remote
-Desktop. Its graphical access path is tailnet noVNC. Ubuntu AMD64 retains CRD.
+Desktop. Its graphical access path is tailnet noVNC. Ubuntu AMD64 keeps CRD as
+the backwards-compatible default, but the guided installer may build a matched
+`INSTALL_CRD=0` image for noVNC-only headless operation. Never switch only the
+runtime flag against an image whose CRD label does not match.

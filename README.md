@@ -41,6 +41,20 @@ and checksums are pinned in the `Dockerfile` for reproducible builds.
 - [Agent deployment question and execution playbook](docs/agent-deployment.md)
 - [Security boundaries](SECURITY.md)
 
+## Supported installation matrix
+
+| Host | Host GUI required | Desktop mode | How Tailscale is approved |
+| --- | --- | --- | --- |
+| Apple silicon macOS | A logged-in macOS session is required for Docker Desktop and launchd, but the container does not use the host display | Native ARM64, noVNC only, no CRD, no Rosetta | Open the URL printed by the installer on this Mac or any other trusted browser |
+| Ubuntu 24.04 AMD64 server or workstation | No | noVNC-only | Keep the SSH/console installer attached and open its printed URL on another trusted computer or phone |
+| Ubuntu 24.04 AMD64 server or workstation | No | CRD plus noVNC | Approve Tailscale from any trusted browser, then complete Google's headless CRD registration from a trusted browser and Tailscale SSH |
+
+The automated installer does not currently support Intel macOS, Linux ARM64,
+other Linux distributions, Windows/WSL, rootless or remote Docker, Linux without
+AppArmor, or serverless container platforms. A machine outside the matrix needs
+separate platform work; do not force an AMD64 image through Rosetta or another
+emulation layer and describe it as native support.
+
 ## One-line guided installation
 
 Run this from an interactive terminal on Ubuntu 24.04 AMD64 or Apple silicon
@@ -58,6 +72,12 @@ configuration questions, enrolls
 Tailscale through a hidden auth-key prompt or browser URL, configures the
 authenticated HTTPS gateway, starts the container, and prints the remaining
 platform-specific Codex and Playwright-extension steps.
+
+On a headless Ubuntu host, run the installer in an SSH session with a PTY. The
+browser-enrollment option prints a short-lived Tailscale login URL in that
+terminal and waits. Copy the URL to any other trusted Mac, PC, phone, or tablet,
+approve the intended tailnet there, then return to the waiting terminal. The
+headless host never needs a browser, and noVNC is not involved in enrollment.
 
 For review-before-execution, download and inspect the bootstrap first:
 
@@ -347,27 +367,13 @@ full CDP for tasks that actually need browser internals.
 On Ubuntu:
 
 ```bash
-systemctl status codex-desktop.service --no-pager
-docker inspect codex-desktop-desktop-1 \
-  --format '{{.State.Health.Status}}'
-docker exec codex-desktop-desktop-1 \
-  dpkg-query -W chatgpt chrome-remote-desktop google-chrome-stable
-docker exec codex-desktop-desktop-1 tailscale status
-docker exec codex-desktop-desktop-1 tailscale ip -4
-docker exec codex-desktop-desktop-1 \
-  supervisorctl status desktop-session x11vnc novnc
-docker exec codex-desktop-desktop-1 \
-  /usr/local/sbin/codex-desktop-healthcheck
-docker inspect codex-desktop-desktop-1 \
-  --format '{{json .NetworkSettings.Ports}}'
-docker exec -u codex codex-desktop-desktop-1 \
-  /opt/google/chrome-remote-desktop/chrome-remote-desktop --get-status
+sudo /opt/services/codex-desktop/scripts/verify-deployment.sh
 ```
 
-The final CRD status command applies only when
-`CODEX_DESKTOP_CRD_ENABLED=1`. In noVNC-only mode, verify that
-`desktop-session`, `x11vnc`, and `novnc` report `RUNNING` and connect through
-the authenticated noVNC URL.
+Use `--allow-incomplete` only before the user has provisioned the Playwright
+extension token or, when enabled, completed CRD registration. The verifier
+reads `CODEX_DESKTOP_CRD_ENABLED`, verifies that the image label and installed
+packages match it, and does not query CRD in a noVNC-only image.
 
 On Apple silicon:
 
@@ -409,6 +415,12 @@ before moving it off the host.
 This is a Linux workstation container, not a stateless web service. It requires
 device and capability access that ordinary serverless container platforms do
 not provide. A Linux VM is the appropriate host when moving it to a cloud.
+
+Supported means the guided installer and acceptance verifier have explicit
+platform logic. Current supported hosts are only Ubuntu 24.04 AMD64 and Apple
+silicon macOS. A graphical environment on Ubuntu is irrelevant because the
+desktop is container-managed; Linux ARM64 remains unsupported even though the
+native ARM64 macOS image exists.
 
 Third-party packages remain subject to their respective vendors' terms. This
 repository does not include authentication state or redistribute package

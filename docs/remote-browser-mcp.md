@@ -148,6 +148,32 @@ HTTPS origin and bearer token displayed by `remote-browser-credentials`. Use the
 token-path endpoint only when a client cannot send headers, because URLs are
 more likely to be retained in history or diagnostics.
 
+Use a unique MCP server name for each physical browser host. For example, keep
+an existing remote service as `remote_browser` or `browser_codexgui` and add a
+same-host deployment as `browser_home`. Do not replace one entry merely because
+both servers expose the same Playwright tool names.
+
+Codex clients can store the endpoint and only an environment-variable reference:
+
+```bash
+codex mcp add browser_home \
+  --url https://TAILSCALE_HOSTNAME/mcp \
+  --bearer-token-env-var CODEX_BROWSER_HOME_TOKEN
+```
+
+The user must place the bearer token in the client's approved secret store or
+launcher environment through a trusted local surface. Never put the value in
+the command, repository, shared shell profile, or an agent transcript. When a
+client supports `http_headers_helper`, it may instead invoke a local secret
+manager command that returns the Authorization header; the helper must not log
+or persist the value.
+
+After the client reloads its MCP configuration, confirm both named servers are
+visible. Initialize the new server, list tools, take one harmless snapshot, and
+delete the session. Restart the container and repeat the initialize/list/snapshot/delete
+sequence to verify that Tailscale identity, gateway credentials, Chrome state,
+and the Playwright extension token all persist.
+
 The server injects the browser-operation playbook and the human-handoff tools
 from `remotechromemcp`. Use the handoff URL when a person must complete login,
 MFA, CAPTCHA, consent, payment, or another sensitive step. Never send website

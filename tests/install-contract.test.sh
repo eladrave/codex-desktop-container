@@ -62,6 +62,22 @@ grep -Fq 'User-only desktop setup still required (no CRD registration):' scripts
 grep -Fq -- '--build-arg "INSTALL_CRD=${crd_enabled}"' scripts/install.sh
 grep -Fq 'io.google.chrome-remote-desktop.enabled' scripts/install.sh
 grep -Fq 'does not match the selected Chrome Remote Desktop mode' scripts/install.sh
+grep -Fq '## Supported installation matrix' README.md
+grep -Fq '## Supported topologies' docs/installation.md
+grep -Fq '## Supported target matrix' docs/agent-deployment.md
+grep -Fq 'Copy the printed Tailscale login URL directly to another trusted computer,' \
+  docs/installation.md
+grep -Fq 'noVNC is not used for Tailscale enrollment' AGENTS.md \
+  docs/agent-deployment.md
+grep -Fq 'The Docker host does not need a GUI or browser.' docs/tailscale.md
+grep -Fq 'browser_home' docs/installation.md docs/remote-browser-mcp.md \
+  docs/agent-deployment.md
+grep -Fq -- '--bearer-token-env-var CODEX_BROWSER_HOME_TOKEN' \
+  docs/installation.md docs/remote-browser-mcp.md docs/agent-deployment.md
+grep -Fq '## Interrupted installation and enrollment recovery' \
+  docs/installation.md
+grep -Fq '## 7. Resume and recovery rules' docs/agent-deployment.md
+grep -Fq 'short-lived sensitive device-claim link' SECURITY.md
 grep -Fq -- '--tun=userspace-networking' supervisord.conf
 grep -Fq 'platform: linux/arm64' compose.macos.yaml
 grep -Fq 'INSTALL_CRD=0' scripts/install-macos.sh

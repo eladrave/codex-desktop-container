@@ -5,9 +5,29 @@ keeping all secrets and user-only authentication steps out of chat and logs.
 It does not authorize deployment by itself. Deploy only when the user explicitly
 asks for installation on a named host.
 
+For image, installer, Compose, and verification behavior, the clean checked-out
+repository and its exact commit are authoritative. Private host runbooks may
+provide connection aliases, current service ownership, and production
+constraints, but older embedded Dockerfiles, tags, or procedures must not
+override newer repository code without an explicit reconciliation.
+
 The repository supports only the Tailscale-only topology. Do not add LAN/public
 port mappings, a public proxy, or an in-container public SSH service during this
 workflow.
+
+## Supported target matrix
+
+| Target | Host GUI | Required selection | User-only browser work |
+| --- | --- | --- | --- |
+| Apple silicon macOS | The user must remain logged in for Docker Desktop and launchd; the container does not use the host display | Native ARM64, noVNC only, CRD absent, no Rosetta | Approve Tailscale on this or another trusted device, then use noVNC for Codex and extension setup |
+| Ubuntu 24.04 AMD64 headless or graphical | Not required | noVNC-only, matched `INSTALL_CRD=0` image | Approve Tailscale on another trusted device, then use noVNC |
+| Ubuntu 24.04 AMD64 headless or graphical | Not required | CRD enabled, matched `INSTALL_CRD=1` image | Approve Tailscale on another trusted device, then complete Google's headless CRD registration before expecting noVNC to show a desktop |
+
+Reject or report as unsupported: Intel macOS, Linux ARM64, other Linux
+distributions, Windows/WSL, rootless Docker, a remote Docker daemon, Linux
+without systemd and AppArmor, and serverless container platforms. Do not invent
+an installation path, force AMD64 emulation on Apple silicon, or weaken the
+documented security profile.
 
 ## 1. Ask the user these questions in order
 
@@ -92,6 +112,21 @@ one-line bootstrap invokes this same entry point after platform detection.
 Use an interactive TTY. Answer the non-secret configuration prompts from the
 user's confirmed choices.
 
+For a remote Ubuntu host, first perform read-only host and repository checks
+through the approved SSH alias. Then keep a PTY attached for the entire
+installer, using the already-resolved checkout path:
+
+```bash
+ssh -t APPROVED_ALIAS \
+  'cd /ABSOLUTE/PATH/TO/codex-desktop-container && sudo ./scripts/install.sh'
+```
+
+Do not invent the alias or checkout path. Do not pipe the installer through a
+non-interactive executor: its confirmations, hidden secret input, and browser
+enrollment all use `/dev/tty`. If the agent environment cannot preserve that
+TTY and present the waiting enrollment URL directly to the user, stop and ask
+the user to run the same command in their own SSH terminal.
+
 ### Auth-key pause
 
 When the user selected an auth key, stop and let them type it into the hidden
@@ -110,9 +145,23 @@ is gone after enrollment without displaying its former contents.
 
 ### Browser-login pause
 
-When the user selected browser login, the installer prints a URL. Relay that URL
-only to the user, wait while they select the correct account/tailnet and approve
-the node, then let the waiting command finish. Do not choose an account for them.
+When the user selected browser login, keep the installer attached. Ubuntu's
+foreground `tailscale up` prints the URL to the SSH/console terminal; macOS
+polls structured Tailscale state and prints the discovered `AuthURL` to
+`/dev/tty`.
+
+The host does not need a browser. Hand the short-lived URL directly to the user,
+who may open it on a different trusted Mac, PC, phone, or tablet. Do not put it
+in a durable transcript, log, ticket, or document. Ask the user to select the
+intended account and tailnet and approve the device. Do not choose an account
+for them. After the command finishes, verify only the sanitized account,
+MagicDNS suffix, node DNS name, and online state before confirming the
+installer prompt. noVNC is not used for Tailscale enrollment.
+
+If the URL expires or the TTY disconnects, preserve all volumes and rerun the
+installer from the same clean commit. If the wrong tailnet appears, stop. Do not
+automatically run `tailscale logout` or `tailscale switch`; either operation
+changes access and requires explicit operator approval.
 
 ## 4. Coordinate user-only desktop steps
 
@@ -131,6 +180,11 @@ authorization code or PIN into chat. Direct the user to:
 8. Configure full CDP only if required and accept that approval prompts may
    prevent fully unattended use.
 
+CRD-enabled mode does not start the shared Xfce display until the persistent
+CRD host configuration exists. Therefore the noVNC URL is not a substitute for
+the registration steps above. Use noVNC-only mode when Google CRD must not be a
+bootstrap dependency.
+
 On Apple silicon or Ubuntu with CRD disabled, omit steps 1-4. Retrieve the
 one-click noVNC URL only in the trusted local container TTY, open it from the
 tailnet, sign in to Codex, and continue with the Chrome integration steps.
@@ -139,6 +193,30 @@ For both platforms, direct the user to install the Playwright extension in the
 same Chrome profile and run `remote-browser-extension-token` in a trusted
 interactive root shell. They must paste the token only into that helper's hidden
 prompt. Never ask for the token in chat and never put it in a command argument.
+
+### Configure a distinct MCP client name
+
+Ask the user for a short location name or derive one from an already confirmed
+host label. Use names such as `browser_home`, `browser_office`, or
+`browser_codexgui`. Preserve any existing remote-browser entry instead of
+overwriting it.
+
+For Codex, register the non-secret endpoint and environment-variable name:
+
+```bash
+codex mcp add browser_home \
+  --url https://TAILSCALE_HOSTNAME/mcp \
+  --bearer-token-env-var CODEX_BROWSER_HOME_TOKEN
+```
+
+The user, not the agent transcript, must move the bearer token shown by
+`remote-browser-credentials` into the client's approved secret store or
+launcher environment. A local `http_headers_helper` is acceptable only when it
+reads from an OS secret manager or other root/user-protected store and emits no
+logs. Do not run or capture `remote-browser-credentials` through agent tools.
+
+Reload the client and confirm the new unique server name and the pre-existing
+remote server both remain available.
 
 ## 5. Verify
 
@@ -177,3 +255,20 @@ location, and any incomplete user-only step.
 Never include auth keys, CRD codes, PINs, browser cookies, gateway credentials,
 extension tokens, OAuth material, private profile contents, or Tailscale state
 in the report.
+
+## 7. Resume and recovery rules
+
+- An interrupted installer may leave a healthy base container intentionally.
+  Reconnect with a PTY, inspect sanitized status, and rerun the same clean
+  commit. Preserve the persistent state.
+- An expired or lost enrollment URL is replaced by rerunning browser
+  enrollment. Never reuse one from chat or logs.
+- A wrong-tailnet result is an access-impacting mismatch. Preserve it for
+  investigation and request explicit direction before logging out or switching.
+- Missing Serve 443 requires checking Tailscale state, MagicDNS, HTTPS, and ACL
+  prerequisites. Never publish a Docker port as a recovery shortcut.
+- A CRD-enabled image and a noVNC-only runtime flag, or the reverse, is invalid.
+  Rebuild or choose an image whose CRD label matches the configured mode.
+- Base verification may use `--allow-incomplete` only while a named user-only
+  CRD or Playwright-extension step remains. Do not report full deployment
+  success until the real MCP and browser acceptance checks pass.

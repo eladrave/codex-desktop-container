@@ -6,6 +6,19 @@ HTTPS, authenticated noVNC, remote Playwright MCP, and optional Chrome Remote
 Desktop on Ubuntu are the supported access paths. Ubuntu does not require a
 host graphical environment: noVNC-only mode runs Xvfb/Xfce in the container.
 
+## Supported topologies
+
+| Target host | Host GUI needed | Container desktop | Remote approval path |
+| --- | --- | --- | --- |
+| Apple silicon macOS | The Mac must remain logged in for Docker Desktop and launchd; the container does not use the macOS display | Native ARM64 Xvfb/Xfce with noVNC, no CRD, no Rosetta | Open the installer URL on this Mac or another trusted browser |
+| Ubuntu 24.04 AMD64, noVNC-only | No | A CRD-free image starts Xvfb/Xfce immediately | Run the installer from an SSH or console TTY and open its URL on another trusted device |
+| Ubuntu 24.04 AMD64, CRD enabled | No | CRD owns the Xvfb/Xfce session after registration; noVNC shows that same desktop | Approve Tailscale on any trusted device, then complete Google's headless registration through Tailscale SSH |
+
+The automated path does not support Intel macOS, Linux ARM64, other Linux
+distributions, Windows/WSL, rootless Docker, a remote Docker daemon, Linux
+without systemd and AppArmor, or serverless container services. Do not silently
+substitute emulation or weaken the security profile for an unsupported host.
+
 ## Requirements
 
 - Ubuntu 24.04 AMD64 with root/sudo access, or Apple silicon macOS with an
@@ -14,6 +27,11 @@ host graphical environment: noVNC-only mode runs Xvfb/Xfce in the container.
 - Git and tar; Linux also requires jq and `apparmor_parser`
 - At least 8 GiB host memory recommended
 - A Tailscale account with permission to add the device
+- A separate allowed Tailscale client device for SSH/noVNC administration, or
+  another trusted browser for initial cross-device enrollment
+- Tailnet policy allowing the intended administrators to use Tailscale SSH and
+  intended MCP/noVNC clients to reach this node on TCP 443
+- MagicDNS and Tailscale HTTPS available for the Serve gateway
 - On Ubuntu only when CRD is enabled, a Google account authorized for Chrome
   Remote Desktop
 - An interactive trusted terminal for secret and PIN entry
@@ -161,18 +179,33 @@ It then deletes the temporary file. The key is never written to
 
 ### Browser login URL
 
-The installer runs:
+Ubuntu runs the enrollment command in the foreground:
 
 ```bash
 docker exec -i codex-desktop-desktop-1 \
   tailscale up --hostname=codex-desktop --ssh
 ```
 
-The installer polls Tailscale's structured daemon status and prints the login
-URL directly to the trusted terminal. Open that URL in a trusted browser, sign
-in with the intended account, select the correct tailnet, and approve the
-device. When multiple accounts share the browser, use a private browser window
-so an old session does not silently select the wrong account.
+The command prints a short-lived login URL directly in the SSH or console
+terminal and waits. macOS starts the same enrollment in the background, polls
+structured daemon status for `AuthURL`, prints it to `/dev/tty`, and also waits.
+
+The approval browser does not have to be on the Docker host. For a headless
+machine:
+
+1. Keep the installer attached in its trusted SSH or console TTY.
+2. Copy the printed Tailscale login URL directly to another trusted computer,
+   phone, or tablet. Treat it as a short-lived sensitive enrollment link; do
+   not put it in chat, logs, tickets, or documentation.
+3. Sign in with the intended account, select the correct tailnet, and approve
+   the new device. Use a private browser window when multiple accounts may
+   already be signed in.
+4. Return to the waiting terminal. The installer verifies `BackendState`, the
+   account, MagicDNS suffix, node DNS name, and online state before asking for
+   confirmation.
+5. Continue to CRD or noVNC only after that confirmation.
+
+No host GUI and no noVNC connection are needed for Tailscale enrollment.
 
 The command returns after approval. The resulting identity persists at
 `/var/lib/codex-desktop/tailscale` and is reused after container recreation and
@@ -222,6 +255,12 @@ in chat, Git, logs, or a saved command.
 
 The image's compatibility wrapper runs registration as user `codex` and saves
 the host configuration under the persistent home.
+
+In CRD-enabled mode the supervised desktop process waits for the persistent CRD
+host configuration before it starts the shared Xfce display. Therefore noVNC
+does not provide a usable desktop until registration is complete. Choose
+noVNC-only mode during installation when Google CRD must not be a bootstrap
+dependency.
 
 Verify without displaying the host configuration contents:
 
@@ -281,6 +320,34 @@ saved shell command. Prefer bearer authentication. Use the token-path MCP URL
 only for clients that cannot set headers. See
 [Remote browser MCP](remote-browser-mcp.md) for routes and recovery.
 
+### Name and configure the MCP client
+
+Give every physical browser host a distinct MCP server name. Recommended names
+are `browser_home`, `browser_office`, or `browser_codexgui`. Keep an existing
+remote server under its current name instead of overwriting it. Codex exposes
+the server name as the namespace that distinguishes otherwise identical browser
+tools.
+
+For a Codex client, add the Streamable HTTP server without placing the bearer
+token on the command line:
+
+```bash
+codex mcp add browser_home \
+  --url https://TAILSCALE_HOSTNAME/mcp \
+  --bearer-token-env-var CODEX_BROWSER_HOME_TOKEN
+```
+
+The command stores only the environment-variable name. Put the token retrieved
+by the user from `remote-browser-credentials` into the client's approved secret
+store or launcher environment, never in Git, a shared shell profile, chat, or
+the command above. A client that supports a local HTTP-header helper may use one
+that returns `Authorization: Bearer ...` from an OS secret manager. Do not make
+an agent capture the credential helper's output.
+
+Restart or reload the MCP client, confirm both uniquely named servers appear,
+then initialize `browser_home`, list its tools, take a harmless snapshot, and
+delete the test session. Repeat after a container restart to prove persistence.
+
 ## Verification
 
 Run on the host:
@@ -309,6 +376,21 @@ Then perform the interactive acceptance checks:
    extensions, cookies, gateway credentials, and extension token all survive.
 6. When Ubuntu CRD is enabled, confirm its registration also survives.
 7. Trigger one scheduled task without leaving a remote viewer attached.
+
+## Interrupted installation and enrollment recovery
+
+| Symptom | Safe recovery |
+| --- | --- |
+| Login URL expired or was never opened | Leave the persistent volumes intact and rerun the installer from the same clean commit. Choose browser enrollment again to obtain a new short-lived URL. |
+| SSH disconnected while the installer waited | Reconnect with a PTY, inspect only sanitized container health and Tailscale status, then rerun the installer. Its base deployment and persistent volumes are designed to survive an incomplete enrollment. |
+| Wrong Tailscale account or tailnet was selected | Stop. The installer preserves the observed identity for investigation and refuses to claim success. Switching or logging out changes access and requires explicit operator approval; do not do it automatically. |
+| Tailscale is running but Serve 443 is absent | Check `tailscale status`, `tailscale serve status`, MagicDNS, HTTPS availability, and tailnet ACLs. Fix the prerequisite, then rerun the same installer or restart only the gateway. Do not publish a Docker port as a workaround. |
+| CRD mode has no visible noVNC desktop | Complete CRD registration first, or reinstall with a matched `INSTALL_CRD=0` noVNC-only image. Do not flip only the runtime flag. |
+| Playwright MCP does not listen on 8932 | Provision the extension token through `remote-browser-extension-token`, then inspect only the supervised MCP status. Do not start a second Chrome or enable TCP 9222. |
+
+For upgrades or partial reruns, preserve home, Tailscale, and machine state as
+one set. Use `--allow-incomplete` only to validate the base deployment while a
+documented user-only step remains.
 
 ## Upgrade and rollback
 
@@ -361,3 +443,6 @@ The installed launch agent starts Docker Desktop and the Compose project when
 the user logs in. It cannot run while the Mac is powered off, logged out, or
 asleep. Configure macOS power settings appropriate for the intended scheduled
 work and keep the user session logged in.
+
+Linux ARM64 is not implied by this image. The ARM64 installer, packaging, volume
+layout, and acceptance path are currently specific to Apple silicon macOS.

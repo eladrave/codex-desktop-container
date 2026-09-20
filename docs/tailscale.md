@@ -61,19 +61,36 @@ trap so the temporary file is removed after errors.
 
 ## Enroll with a browser login URL
 
-Run:
+On Ubuntu, run the guided installer in an attached SSH or console TTY. Its
+foreground enrollment step is equivalent to:
 
 ```bash
 sudo docker exec -i codex-desktop-desktop-1 \
   tailscale up --hostname=codex-desktop --ssh
 ```
 
-Open the printed URL in a trusted browser. Sign in with the intended Tailscale
-account, select the correct tailnet, and approve the device. Use a private
-browser window when multiple accounts may already be signed in.
+On Apple silicon the installer starts enrollment in the background and polls
+`tailscale status --json` until `AuthURL` appears. In both cases, the installer
+prints the short-lived login URL to the trusted terminal and waits.
+
+The Docker host does not need a GUI or browser. Copy the URL directly to a
+trusted browser on another Mac, PC, phone, or tablet, sign in with the intended
+Tailscale account, select the correct tailnet, and approve the device. Use a
+private browser window when multiple accounts may already be signed in. Treat
+the URL as a short-lived sensitive enrollment link: give it only to the user
+performing approval and do not retain it in chat, logs, tickets, or docs.
 
 Do not interrupt the command while browser approval is pending. It returns when
-the device is enrolled.
+the device is enrolled. The installer then displays a sanitized account,
+MagicDNS suffix, node DNS name, and online state and requires the operator to
+confirm that they match the intended tailnet. noVNC is not needed until after
+this enrollment succeeds.
+
+If the URL expires, the terminal disconnects, or approval never completes,
+leave the persistent state intact and rerun the guided installer from the same
+clean commit to obtain a new URL. If the wrong tailnet was selected, stop: the
+installer deliberately preserves the observed identity for investigation and
+does not log out or switch accounts without explicit operator approval.
 
 ## Connect to the container
 

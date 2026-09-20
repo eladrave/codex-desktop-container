@@ -5,6 +5,13 @@ PINs, Codex authentication state, SSH private keys, browser profiles, gateway
 credentials, Playwright extension tokens, or files from any persistent state
 directory.
 
+The browser-enrollment `AuthURL` is a short-lived sensitive device-claim link.
+It may be handed directly to the user who is approving the node and opened on a
+different trusted machine, but it must not be stored in chat, logs, tickets,
+documentation, shell history, or telemetry. noVNC is not required for this
+approval. After approval, report only sanitized account, MagicDNS, node-name,
+and online-state fields.
+
 Treat `/var/lib/codex-desktop/home/.config/google-chrome` as a credential
 store. It can contain cookies, local storage, installed extensions, and active
 website sessions. Full Chrome DevTools Protocol access is mediated by the Codex
