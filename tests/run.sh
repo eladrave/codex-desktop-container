@@ -19,6 +19,7 @@ for test_script in \
   tests/mcp-keeper-contract.test.sh \
   tests/novnc-contract.test.sh \
   tests/session-handoff.test.sh \
+  tests/tailscale-topology.test.sh \
   tests/unified-remote-browser-contract.test.sh \
   tests/remote-browser-gateway-contract.test.sh; do
   bash "${test_script}"

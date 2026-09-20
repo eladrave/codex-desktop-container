@@ -26,14 +26,18 @@ Keep the tailnet policy default-deny for every other TCP port on this node and
 grant intended clients only Tailscale SSH and HTTPS 443.
 
 Tailscale Serve is the default ingress and exposes only HTTPS 443 to the
-authenticated gateway on `127.0.0.1:8443`. MCP, noVNC, and x11vnc bind to
+authenticated gateway on `127.0.0.1:8443`. When public MCP Funnel is explicitly
+enabled, private Serve moves to HTTPS 8443 and public Funnel HTTPS 443 targets
+the separate MCP-only listener on `127.0.0.1:8445`. That listener has no
+permanent login, Basic Auth, noVNC, guest, health, generic proxy, or CDP route.
+MCP, noVNC, and x11vnc bind to
 `127.0.0.2` on ports 8932, 6081, and 5900. Tailscale runs with
 `--tun=userspace-networking`; binding an unauthenticated backend to
 `127.0.0.1` could make the same port tailnet-reachable and bypass the gateway.
 Do not change these backends to `127.0.0.1`, a wildcard address, or IPv6. Do
 not publish any of these ports through Docker.
 
-Temporary guest access is the only supported public ingress. It uses a
+Temporary guest access is the only supported public desktop ingress. It uses a
 foreground Tailscale Funnel on external HTTPS 10000 and a separate guest-only
 proxy on `127.0.0.1:8444`; it never funnels the permanent gateway on 8443.
 The guest proxy has no MCP, permanent-login, Basic Auth, generic proxy, or
@@ -42,6 +46,13 @@ Secure, HttpOnly, SameSite=Strict cookie. Both remain bounded by the original
 30-minute deadline. Revocation or expiry destroys open guest sockets and stops
 the foreground Funnel process. Guest state is memory-only and must not return
 after a broker or container restart.
+
+The optional permanent public MCP ingress uses the independently generated MCP
+token and no desktop route. Funnel visibility applies to the entire external
+port, so never Funnel the combined gateway on `127.0.0.1:8443`. Clear and
+verify only the service-owned HTTPS port before changing it between Serve and
+Funnel; never use `tailscale funnel reset`, which could destroy the independent
+guest configuration.
 
 Creating guest access is a security-sensitive, mutating action. The MCP tool
 must accept no arguments and must be used only after the user explicitly says

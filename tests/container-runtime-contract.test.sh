@@ -74,13 +74,14 @@ done
 listeners="$(ss -lntH)"
 for endpoint in \
   127.0.0.1:8443 \
+  127.0.0.1:8445 \
   127.0.0.2:6081 \
   127.0.0.2:5900 \
   127.0.0.2:8932; do
   grep -Eq "[[:space:]]${endpoint}[[:space:]]" <<<"${listeners}" ||
     fail "expected private listener is missing: ${endpoint}"
 done
-if grep -Eq '(^|[[:space:]])(0\.0\.0\.0|\*|\[::\]|::):(5900|6081|8932|8443|8444)([[:space:]]|$)' \
+if grep -Eq '(^|[[:space:]])(0\.0\.0\.0|\*|\[::\]|::):(5900|6081|8932|8443|8444|8445)([[:space:]]|$)' \
   <<<"${listeners}"; then
   fail 'a browser-control listener is bound to a wildcard address'
 fi
@@ -88,7 +89,7 @@ if grep -Eq '(^|[[:space:]])(127\.[0-9.]+|\[::1\]|::1):9222([[:space:]]|$)' \
   <<<"${listeners}"; then
   fail 'Chrome CDP port 9222 is listening'
 fi
-if grep -Eq '\[::[01]?\]:(5900|6081|8932|8444)' <<<"${listeners}"; then
+if grep -Eq '\[::[01]?\]:(5900|6081|8932|8444|8445)' <<<"${listeners}"; then
   fail 'a private backend regressed to a bracketed IPv6 listener'
 fi
 
@@ -175,6 +176,16 @@ unauthorized="$(curl -sS -o /dev/null -w '%{http_code}' \
   -X POST -H 'Content-Type: application/json' \
   --data '{}' http://127.0.0.1:8443/mcp)"
 [[ "${unauthorized}" == 401 ]] || fail 'anonymous MCP request was not rejected'
+public_login="$(curl -sS -o /dev/null -w '%{http_code}' \
+  http://127.0.0.1:8445/login/)"
+[[ "${public_login}" == 404 ]] || fail 'public MCP listener exposed permanent login'
+public_health="$(curl -sS -o /dev/null -w '%{http_code}' \
+  http://127.0.0.1:8445/healthz)"
+[[ "${public_health}" == 404 ]] || fail 'public MCP listener exposed private health'
+public_anonymous="$(curl -sS -o /dev/null -w '%{http_code}' \
+  -X POST -H 'Content-Type: application/json' \
+  --data '{}' http://127.0.0.1:8445/mcp)"
+[[ "${public_anonymous}" == 404 ]] || fail 'public MCP listener exposed unauthenticated MCP'
 get_code="$(curl -sS -o /dev/null -w '%{http_code}' \
   -H "Authorization: Bearer ${MCP_TOKEN}" \
   http://127.0.0.1:8443/mcp)"

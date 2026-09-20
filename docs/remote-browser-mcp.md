@@ -8,7 +8,7 @@ extension, or enable a TCP Chrome debugging port.
 
 ## Network and process contract
 
-Docker publishes no ports. Tailscale Serve is the only inbound path:
+Docker publishes no ports. The default inbound path is private Tailscale Serve:
 
 ```text
 tailnet client
@@ -19,6 +19,24 @@ tailnet client
         -> x11vnc 127.0.0.2:5900
           -> the managed Xfce display and persistent Chrome
 ```
+
+When `REMOTE_BROWSER_PUBLIC_MCP_FUNNEL=1`, public MCP and private desktop
+traffic are separated:
+
+```text
+public MCP client
+  -> Tailscale Funnel HTTPS :443
+    -> MCP-only gateway 127.0.0.1:8445
+      -> Playwright MCP 127.0.0.2:8932
+
+tailnet desktop client
+  -> Tailscale Serve HTTPS :8443
+    -> authenticated gateway 127.0.0.1:8443
+      -> private MCP and noVNC backends
+```
+
+Funnel never targets the combined gateway. The MCP-only listener returns 404
+for login, noVNC, guest, health, and arbitrary paths.
 
 The `127.0.0.2` backend addresses are deliberate. In Tailscale userspace mode,
 tailnet traffic to a port can be forwarded to the same port on `127.0.0.1`.
@@ -58,6 +76,10 @@ The Tailscale HTTPS origin is normally:
 ```text
 https://TAILSCALE_HOSTNAME
 ```
+
+With public MCP Funnel enabled, the public MCP origin remains
+`https://TAILSCALE_HOSTNAME`, while the permanent tailnet-only noVNC origin is
+`https://TAILSCALE_HOSTNAME:8443`.
 
 The gateway provides:
 
@@ -160,6 +182,10 @@ The server injects the browser-operation playbook and the human-handoff tools
 from `remotechromemcp`. Use the handoff URL when a person must complete login,
 MFA, CAPTCHA, consent, payment, or another sensitive step. Never send website
 credentials, recovery codes, cookies, or MFA material through MCP or chat.
+
+ChatGPT clients that cannot send a static bearer header should select no
+authentication in the client and use the exact token-in-path compatibility URL
+printed by `remote-browser-credentials`. Treat the entire URL as a secret.
 
 ## Permanent and temporary noVNC links
 

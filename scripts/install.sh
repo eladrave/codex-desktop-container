@@ -32,7 +32,8 @@ usage() {
   cat <<'EOF'
 Usage: sudo ./scripts/install.sh
 
-Guided installer for the Tailscale-only Codex Desktop container.
+Guided installer for the Codex Desktop container with private Serve and an
+optional public MCP-only Funnel.
 Run it from a clean clone on an Ubuntu 24.04 AMD64 Docker host with a TTY.
 EOF
 }
@@ -241,6 +242,12 @@ if [[ -r "${service_dir}/REVISION" && \
 fi
 default_container_hostname="$(read_existing_value CONTAINER_HOSTNAME codex-desktop)"
 default_tailscale_hostname="$(read_existing_value TAILSCALE_HOSTNAME codex-desktop)"
+default_public_mcp_funnel="$(read_existing_value REMOTE_BROWSER_PUBLIC_MCP_FUNNEL 0)"
+case "${default_public_mcp_funnel}" in
+  1) default_public_mcp_choice=yes ;;
+  0) default_public_mcp_choice=no ;;
+  *) die 'Existing REMOTE_BROWSER_PUBLIC_MCP_FUNNEL must be 0 or 1.' ;;
+esac
 default_timezone="$(read_existing_value TZ Etc/UTC)"
 default_crd_enabled="$(read_existing_value CODEX_DESKTOP_CRD_ENABLED 1)"
 case "${default_crd_enabled}" in
@@ -255,6 +262,8 @@ default_cpu_limit="$(read_existing_value CPU_LIMIT 2.0)"
 
 container_hostname=
 tailscale_hostname=
+public_mcp_choice=
+public_mcp_funnel=
 tailnet_label=
 timezone=
 crd_choice=
@@ -304,7 +313,7 @@ fi
 
 printf '%s\n' \
   'Codex Desktop guided installation' \
-  'No public or LAN ports will be published. Tailscale HTTPS/SSH and authenticated noVNC remain available.' \
+  'No Docker host or LAN ports will be published. Tailscale HTTPS/SSH and authenticated noVNC remain available.' \
   '' >/dev/tty
 
 prompt_default container_hostname 'Container hostname' "${default_container_hostname}"
@@ -314,6 +323,14 @@ validate_hostname "${tailscale_hostname}" || die 'Invalid Tailscale hostname.'
 prompt_default tailnet_label \
   'Expected Tailscale account or tailnet label, used only for confirmation' \
   'confirm-in-browser'
+prompt_yes_no public_mcp_choice \
+  'Expose only authenticated MCP publicly through Tailscale Funnel HTTPS 443?' \
+  "${default_public_mcp_choice}"
+if [[ "${public_mcp_choice}" == yes ]]; then
+  public_mcp_funnel=1
+else
+  public_mcp_funnel=0
+fi
 prompt_default timezone 'Timezone' "${default_timezone}"
 validate_timezone "${timezone}" || die 'Invalid timezone.'
 [[ -e "/usr/share/zoneinfo/${timezone}" ]] || die 'Timezone was not found under /usr/share/zoneinfo.'
@@ -392,6 +409,11 @@ printf '  Image: %s\n' "${image_ref}" >/dev/tty
 printf '  Container hostname: %s\n' "${container_hostname}" >/dev/tty
 printf '  Tailscale hostname: %s\n' "${tailscale_hostname}" >/dev/tty
 printf '  Expected tailnet/account: %s\n' "${tailnet_label}" >/dev/tty
+if [[ "${public_mcp_funnel}" == 1 ]]; then
+  printf '  MCP ingress: public Funnel HTTPS 443; noVNC remains tailnet-only on HTTPS 8443\n' >/dev/tty
+else
+  printf '  MCP/noVNC ingress: tailnet-only Serve HTTPS 443\n' >/dev/tty
+fi
 printf '  Timezone: %s\n' "${timezone}" >/dev/tty
 if [[ "${crd_enabled}" == 1 ]]; then
   printf '  Desktop access: authenticated noVNC and Chrome Remote Desktop\n' >/dev/tty
@@ -497,6 +519,7 @@ chmod 0600 "${config_tmp}"
   printf 'IMAGE_REF=%s\n' "${image_ref}"
   printf 'CONTAINER_HOSTNAME=%s\n' "${container_hostname}"
   printf 'TAILSCALE_HOSTNAME=%s\n' "${tailscale_hostname}"
+  printf 'REMOTE_BROWSER_PUBLIC_MCP_FUNNEL=%s\n' "${public_mcp_funnel}"
   printf 'TZ=%s\n' "${timezone}"
   printf 'CODEX_DESKTOP_CRD_ENABLED=%s\n' "${crd_enabled}"
   printf 'DESKTOP_SIZES=%s\n' "${desktop_sizes}"
@@ -611,15 +634,25 @@ fi
 
 serve_ready=0
 for _attempt in $(seq 1 30); do
-  if docker exec "${container_name}" tailscale serve status --json 2>/dev/null | \
-    grep -Fq '127.0.0.1:8443'; then
+  serve_json="$(docker exec "${container_name}" tailscale serve status --json 2>/dev/null || true)"
+  if [[ "${public_mcp_funnel}" == 1 ]] && \
+    jq -e --arg dns "$(docker exec "${container_name}" tailscale status --json | jq -r '.Self.DNSName | rtrimstr(".")')" \
+      '(.Web[$dns + ":443"].Handlers == {"/":{"Proxy":"http://127.0.0.1:8445"}}) and
+       (.AllowFunnel[$dns + ":443"] == true) and
+       (.Web[$dns + ":8443"].Handlers == {"/":{"Proxy":"http://127.0.0.1:8443"}}) and
+       ((.AllowFunnel[$dns + ":8443"] // false) == false)' \
+      <<<"${serve_json}" >/dev/null 2>&1; then
+    serve_ready=1
+    break
+  elif [[ "${public_mcp_funnel}" == 0 ]] && \
+    grep -Fq '127.0.0.1:8443' <<<"${serve_json}"; then
     serve_ready=1
     break
   fi
   sleep 2
 done
 ((serve_ready == 1)) || \
-  die 'Tailscale Serve did not expose the authenticated gateway within 60 seconds.'
+  die 'Tailscale did not establish the requested MCP/noVNC ingress within 60 seconds.'
 
 verify_arguments=()
 if [[ "${crd_enabled}" == 1 ]]; then

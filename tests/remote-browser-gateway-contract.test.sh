@@ -47,11 +47,12 @@ require_regex "${edge_caddyfile}" 'http://:6080' \
 require_literal "${edge_caddyfile}" 'output discard' \
   'edge compatibility access logs must be disabled'
 
-# Caddy is a route/auth gateway, not another public edge. Its only listener is
-# the loopback target selected by Tailscale Serve, and access logs are discarded
-# because both compatibility URLs contain password-equivalent material.
+# Caddy has separate loopback-only private and public-MCP listeners. Tailscale
+# decides which one is private Serve and which one is public Funnel.
 require_regex "${caddyfile}" 'http://:8443([[:space:]]|$|\{)' \
   'the gateway must accept the Tailscale HTTPS proxy host on port 8443'
+require_regex "${caddyfile}" 'http://:8445([[:space:]]|$|\{)' \
+  'the dedicated public-MCP listener is missing'
 require_regex "${caddyfile}" 'bind[[:space:]]+127\.0\.0\.1' \
   'the gateway must explicitly bind its listener to IPv4 loopback'
 require_literal "${caddyfile}" 'output discard' \
@@ -59,6 +60,14 @@ require_literal "${caddyfile}" 'output discard' \
 if rg -n '(^|[[:space:]])(:80|:443|0\.0\.0\.0|\[::\])([[:space:]]|$|\{)' \
   "${caddyfile}"; then
   fail 'the in-container gateway must not listen on a public or wildcard address'
+fi
+require_literal "${caddyfile}" 'Public Funnel terminates TLS on HTTPS 443' \
+  'the public MCP trust boundary must be explicit'
+public_block="$(sed -n '/^http:\/\/:8445 {/,/^# Empty in the default/p' "${caddyfile}")"
+grep -Fq 'reverse_proxy 127.0.0.2:8932' <<<"${public_block}" || \
+  fail 'the public listener must proxy directly to MCP'
+if grep -Eq '6081|5900|/login|/guest|healthz' <<<"${public_block}"; then
+  fail 'the public MCP listener must not expose desktop or health routes'
 fi
 
 # MCP has two compatible authentication forms: bearer /mcp and exact

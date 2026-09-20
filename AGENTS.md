@@ -17,11 +17,13 @@ unsupported unless the user explicitly authorizes separate platform work.
 Do not deploy merely because repository work was requested. Deployment requires
 an explicit current request naming or clearly identifying the target host.
 
-The supported topology is Tailscale-only. Do not add or publish LAN/public
-ports, raw VNC, raw Chrome debugging, or the Docker socket during deployment.
-The only browser gateway ingress is Tailscale Serve HTTPS on TCP 443. Keep the
-gateway on `127.0.0.1:8443` and all unauthenticated backends on `127.0.0.2` so
-Tailscale userspace networking cannot expose them through same-port forwarding.
+The default topology is Tailscale-only. An explicitly enabled public MCP Funnel
+is the sole supported permanent public exception. It exposes HTTPS 443 only to
+the dedicated MCP-only listener on `127.0.0.1:8445`; permanent noVNC moves to
+tailnet-only Serve HTTPS 8443 and the temporary guest desktop remains on Funnel
+HTTPS 10000. Do not publish Docker ports, raw VNC, raw Chrome debugging, or the
+Docker socket. Keep the permanent gateway on `127.0.0.1:8443` and all
+unauthenticated backends on `127.0.0.2`.
 
 Use `scripts/install.sh` for a guided installation and
 `scripts/verify-deployment.sh` for acceptance. Collect non-secret choices in the
@@ -72,6 +74,13 @@ Tailscale is unavailable. It creates a guest-only foreground Funnel on HTTPS
 MCP, the permanent login route, or Basic Auth. Call
 `revoke_temporary_novnc_link` when the user finishes. Never create Funnel access
 proactively for ordinary login, MFA, CAPTCHA, or convenience.
+
+Public MCP Funnel is separately opt-in with
+`REMOTE_BROWSER_PUBLIC_MCP_FUNNEL=1`. It must never target the permanent
+gateway. HTTPS 443 targets only `127.0.0.1:8445`, which has MCP authentication
+routes and returns 404 for noVNC, guest, health, and arbitrary paths. Verify the
+exact Tailscale TCP/Web/AllowFunnel topology rather than accepting substring
+matches, and never use a global Funnel reset.
 
 `scripts/install.sh` is the single public installer entry point. It supports
 Ubuntu 24.04 AMD64 through systemd/AppArmor and Apple silicon macOS through

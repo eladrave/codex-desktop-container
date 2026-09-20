@@ -37,6 +37,7 @@ bash -n \
   tests/novnc-contract.test.sh \
   tests/remote-browser-gateway-contract.test.sh \
   tests/session-handoff.test.sh \
+  tests/tailscale-topology.test.sh \
   tests/unified-remote-browser-contract.test.sh \
   tests/run.sh \
   scripts/validate.sh
@@ -81,6 +82,7 @@ if command -v shellcheck >/dev/null 2>&1; then
     tests/novnc-contract.test.sh \
     tests/remote-browser-gateway-contract.test.sh \
     tests/session-handoff.test.sh \
+    tests/tailscale-topology.test.sh \
     tests/unified-remote-browser-contract.test.sh \
     tests/run.sh \
     scripts/validate.sh

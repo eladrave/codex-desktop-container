@@ -101,6 +101,59 @@ http://:8443 {
 	}
 }
 
+# Public Funnel terminates TLS on HTTPS 443 and forwards only to this listener.
+# Keep it separate from the permanent tailnet gateway so public traffic can
+# never reach noVNC, Basic Auth, the login token, or the health endpoint.
+http://:8445 {
+	bind 127.0.0.1
+
+	log {
+		output discard
+	}
+
+	header {
+		-Server
+		Cache-Control "no-store"
+		Referrer-Policy "no-referrer"
+	}
+
+	@mcp_unsupported {
+		path /mcp /{$REMOTE_BROWSER_MCP_TOKEN}/mcp
+		not method POST DELETE
+	}
+	handle @mcp_unsupported {
+		respond 405
+	}
+
+	@mcp_bearer {
+		path /mcp
+		method POST DELETE
+		header Authorization "Bearer {$REMOTE_BROWSER_MCP_TOKEN}"
+	}
+	handle @mcp_bearer {
+		reverse_proxy 127.0.0.2:8932 {
+			header_up Host 127.0.0.2:8932
+			flush_interval -1
+		}
+	}
+
+	@mcp_token_path {
+		path /{$REMOTE_BROWSER_MCP_TOKEN}/mcp
+		method POST DELETE
+	}
+	handle @mcp_token_path {
+		rewrite * /mcp
+		reverse_proxy 127.0.0.2:8932 {
+			header_up Host 127.0.0.2:8932
+			flush_interval -1
+		}
+	}
+
+	handle {
+		respond 404
+	}
+}
+
 # Empty in the default Tailscale deployment. In explicit CodexGUI edge mode,
 # the gateway wrapper installs the private-network compatibility listeners.
 import /run/remote-browser/edge-compat.caddy

@@ -5,6 +5,7 @@ services:
       # mode adds only the private, in-network compatibility listeners.
       REMOTE_BROWSER_EDGE_COMPAT: "1"
       REMOTE_BROWSER_TAILSCALE_SERVE: "0"
+      REMOTE_BROWSER_PUBLIC_MCP_FUNNEL: "0"
       REMOTE_BROWSER_GUEST_ACCESS_ENABLED: "0"
       REMOTE_BROWSER_ORIGIN: ${REMOTE_BROWSER_ORIGIN:-https://chrome.eladrave.com}
       REMOTE_BROWSER_EDGE_CREDENTIALS_FILE: /etc/remote-browser-edge/credentials.env

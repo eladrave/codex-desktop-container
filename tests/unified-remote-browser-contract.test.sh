@@ -176,11 +176,15 @@ if grep -Eq '^[[:space:]]+(ports|network_mode):' compose.yaml compose.macos.yaml
 fi
 require_literal "${remote_dir}/run-gateway.sh" '127.0.0.1:8443' \
   'Tailscale Serve must target only the authenticated gateway'
+require_literal "${remote_dir}/run-gateway.sh" '127.0.0.1:8445' \
+  'public Funnel must target only the dedicated MCP listener'
 require_literal "${remote_dir}/run-gateway.sh" 'serve' \
   'the gateway runner must configure Tailscale Serve'
+require_literal "${remote_dir}/run-gateway.sh" 'REMOTE_BROWSER_PUBLIC_MCP_FUNNEL' \
+  'public MCP Funnel must be an explicit opt-in'
 require_regex "${remote_dir}/run-gateway.sh" \
-  '(--https=443|https[[:space:]]+443).*127\.0\.0\.1:8443' \
-  'the gateway runner must configure tailnet HTTPS to the gateway only'
+  'funnel.*|--https=443' \
+  'the gateway runner must support public MCP Funnel HTTPS 443'
 if rg -n 'tailscale.*serve.*(5900|6081|8932)' \
   "${remote_dir}" supervisord.conf; then
   fail 'Tailscale Serve must not expose VNC, noVNC, or the MCP backend directly'

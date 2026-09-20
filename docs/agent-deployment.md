@@ -11,9 +11,10 @@ provide connection aliases, current service ownership, and production
 constraints, but older embedded Dockerfiles, tags, or procedures must not
 override newer repository code without an explicit reconciliation.
 
-The repository supports only the Tailscale-only topology. Do not add LAN/public
-port mappings, a public proxy, or an in-container public SSH service during this
-workflow.
+The repository publishes no Docker ports. The only supported permanent public
+exception is the explicit MCP-only Tailscale Funnel option. It must target the
+dedicated `127.0.0.1:8445` listener, while permanent noVNC stays tailnet-only;
+do not add LAN/public port mappings or an in-container public SSH service.
 
 ## Supported target matrix
 
@@ -57,6 +58,8 @@ host-specific runbook.
     target host or use a preloaded image.
 12. **Gateway:** Confirm the default Tailscale Serve HTTPS mode and the ACL that
     permits intended clients to reach TCP 443. Do not request gateway secrets.
+    Ask whether to enable public MCP Funnel. If enabled, public HTTPS 443 serves
+    MCP only and private MCP/noVNC moves to tailnet HTTPS 8443.
 13. **Ubuntu desktop access:** Ask whether to keep the default CRD-enabled mode
     or use noVNC only. noVNC-only mode starts Xvfb/Xfce inside the container and
     does not require a GUI on the Docker host. When CRD is enabled, ask the user
@@ -273,8 +276,9 @@ in the report.
   enrollment. Never reuse one from chat or logs.
 - A wrong-tailnet result is an access-impacting mismatch. Preserve it for
   investigation and request explicit direction before logging out or switching.
-- Missing Serve 443 requires checking Tailscale state, MagicDNS, HTTPS, and ACL
-  prerequisites. Never publish a Docker port as a recovery shortcut.
+- Missing requested Serve/Funnel ingress requires checking Tailscale state,
+  MagicDNS, HTTPS, and policy prerequisites. Never publish a Docker port as a
+  recovery shortcut.
 - A CRD-enabled image and a noVNC-only runtime flag, or the reverse, is invalid.
   Rebuild or choose an image whose CRD label matches the configured mode.
 - Base verification may use `--allow-incomplete` only while a named user-only

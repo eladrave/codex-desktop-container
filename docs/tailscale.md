@@ -1,7 +1,9 @@
 # Tailscale operations
 
-Tailscale is the default deployment's only inbound network. Docker publishes no
-host ports. `tailscaled` runs with `--tun=userspace-networking`, so it requires
+Tailscale is the deployment's only inbound network and Docker publishes no host
+ports. By default all permanent ingress is tailnet-only. Operators may opt into
+a public MCP-only Funnel without exposing the desktop. `tailscaled` runs with
+`--tun=userspace-networking`, so it requires
 no TUN device or network-administration capabilities. Tailscale SSH provides the
 administrative shell. Tailscale Serve terminates tailnet HTTPS on TCP 443 and
 forwards only to the authenticated gateway on `127.0.0.1:8443`.
@@ -212,7 +214,8 @@ unsafe and stop it before accepting traffic.
 
 ## Temporary guest access without a Tailscale client
 
-The permanent noVNC link remains private behind Tailscale Serve HTTPS 443. If
+The permanent noVNC link remains private behind Tailscale Serve HTTPS 443 by
+default, or HTTPS 8443 when public MCP Funnel is enabled. If
 the user explicitly needs access from a guest machine that cannot run
 Tailscale, the MCP tool `create_temporary_novnc_link` starts a separate
 foreground Funnel on HTTPS 10000. It targets only the guest proxy on
@@ -221,8 +224,28 @@ the permanent login token.
 
 The guest link may be redeemed once and the resulting guest session ends at the
 original 30-minute deadline. `revoke_temporary_novnc_link` closes it earlier.
-Serve 443 and Funnel 10000 use different ports and can coexist. Do not manually
-move Funnel to 443, run it with `--bg`, or use `tailscale funnel reset`.
+Private Serve and guest Funnel 10000 use different ports and can coexist. Do
+not manually repoint the guest Funnel, run it with `--bg`, or use
+`tailscale funnel reset`.
+
+## Optional public MCP Funnel
+
+Set `REMOTE_BROWSER_PUBLIC_MCP_FUNNEL=1` only when a cloud MCP client must reach
+the server without joining the tailnet. The managed topology becomes:
+
+```text
+public HTTPS 443 -> Funnel -> 127.0.0.1:8445 -> authenticated MCP only
+tailnet HTTPS 8443 -> Serve -> 127.0.0.1:8443 -> MCP and permanent noVNC
+public HTTPS 10000 -> temporary foreground Funnel -> guest noVNC only
+```
+
+The public listener accepts MCP bearer authentication and the token-in-path
+compatibility URL. It returns 404 for permanent noVNC, guest, health, and every
+other route. The gateway clears only its owned port 443 configuration before
+changing it from Serve to Funnel, verifies the exact TCP/Web/AllowFunnel maps,
+and leaves temporary guest port 10000 untouched. Disabling the option reverses
+the topology and removes the owned Serve 8443 mapping. Never point public
+Funnel at `127.0.0.1:8443` and never use a global Serve/Funnel reset.
 
 Funnel requires MagicDNS, HTTPS, and the Funnel node capability. The broker
 does not change tailnet policy. If `MagicDNSSuffix` is absent from `tailscale

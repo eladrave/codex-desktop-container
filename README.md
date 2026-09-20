@@ -23,7 +23,9 @@ single-use public guest link with a fixed 30-minute maximum lifetime. That
 temporary Funnel exposes only a dedicated noVNC proxy on HTTPS 10000; it never
 publishes MCP or the permanent gateway and can be revoked immediately.
 
-The default is Tailscale-only. An explicit `compose.codexgui.yaml` override
+The default is tailnet-only. An opt-in public Tailscale Funnel exposes only the
+authenticated MCP listener while permanent noVNC remains private. An explicit
+`compose.codexgui.yaml` override
 implements the existing central-edge replacement contract while keeping the
 default deployment detached from codexgui's `edge` network. Applying that
 override is a separate production operation and requires an explicit decision.

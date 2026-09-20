@@ -22,6 +22,9 @@ esac
   echo 'This verifier supports Apple silicon macOS.' >&2
   exit 1
 }
+public_mcp_funnel="$(sed -n 's/^REMOTE_BROWSER_PUBLIC_MCP_FUNNEL=//p' "${config_file}" | tail -n 1)"
+public_mcp_funnel="${public_mcp_funnel:-0}"
+[[ "${public_mcp_funnel}" == 0 || "${public_mcp_funnel}" == 1 ]]
 
 chrome_main_pid() {
   docker exec "${container_name}" bash -c '
@@ -115,6 +118,7 @@ docker exec "${container_name}" supervisorctl status remote-browser-guest-access
 listeners="$(docker exec "${container_name}" ss -lntH)"
 for expected_listener in \
   '127.0.0.1:8443' \
+  '127.0.0.1:8445' \
   '127.0.0.2:5900' \
   '127.0.0.2:6081' \
   '127.0.0.2:8932'; do
@@ -124,12 +128,12 @@ if awk '$4 ~ /:9222$/ { found=1 } END { exit !found }' <<<"${listeners}"; then
   echo 'A process is listening on forbidden Chrome debugging port 9222.' >&2
   exit 1
 fi
-if grep -Eq '(^|[[:space:]])(0\.0\.0\.0|\*|\[::\]|:::):(5900|6081|8932|8443|8444)([[:space:]]|$)' \
+if grep -Eq '(^|[[:space:]])(0\.0\.0\.0|\*|\[::\]|:::):(5900|6081|8932|8443|8444|8445)([[:space:]]|$)' \
   <<<"${listeners}"; then
   echo 'A remote-browser service is listening on a wildcard address.' >&2
   exit 1
 fi
-if grep -Eq '(^|[[:space:]])\[[^]]+\]:(5900|6081|8932|8443|8444)([[:space:]]|$)' \
+if grep -Eq '(^|[[:space:]])\[[^]]+\]:(5900|6081|8932|8443|8444|8445)([[:space:]]|$)' \
   <<<"${listeners}"; then
   echo 'A remote-browser service is listening on IPv6.' >&2
   exit 1
@@ -167,8 +171,24 @@ docker exec "${container_name}" bash -Eeuo pipefail -c '
   http://127.0.0.1:8443/mcp)" == 405 ]]
 [[ "$(docker exec "${container_name}" curl -sS -o /dev/null -w '%{http_code}' \
   http://127.0.0.1:8443/login/)" == 401 ]]
-docker exec "${container_name}" tailscale serve status --json | \
-  grep -Fq '127.0.0.1:8443'
+[[ "$(docker exec "${container_name}" curl -sS -o /dev/null -w '%{http_code}' \
+  http://127.0.0.1:8445/login/)" == 404 ]]
+serve_json="$(docker exec "${container_name}" tailscale serve status --json)"
+tailscale_dns="$(docker exec "${container_name}" sh -c \
+  "tailscale status --json | jq -r '.Self.DNSName | rtrimstr(\".\")'")"
+if [[ "${public_mcp_funnel}" == 1 ]]; then
+  printf '%s' "${serve_json}" | docker exec -i "${container_name}" jq -e --arg dns "${tailscale_dns}" \
+    '(.Web[$dns + ":443"].Handlers == {"/":{"Proxy":"http://127.0.0.1:8445"}}) and
+     (.AllowFunnel[$dns + ":443"] == true) and
+     (.Web[$dns + ":8443"].Handlers == {"/":{"Proxy":"http://127.0.0.1:8443"}}) and
+     ((.AllowFunnel[$dns + ":8443"] // false) == false)' \
+    >/dev/null
+else
+  printf '%s' "${serve_json}" | docker exec -i "${container_name}" jq -e --arg dns "${tailscale_dns}" \
+    '(.Web[$dns + ":443"].Handlers == {"/":{"Proxy":"http://127.0.0.1:8443"}}) and
+     ((.AllowFunnel[$dns + ":443"] // false) == false)' \
+    >/dev/null
+fi
 
 tailscale_summary="$(docker exec "${container_name}" sh -c \
   "tailscale status --json | jq -c '{BackendState,CurrentTailnet,Self:{DNSName:.Self.DNSName,TailscaleIPs:.Self.TailscaleIPs,Online:.Self.Online,Tags:.Self.Tags}}'")"

@@ -1,10 +1,12 @@
 # Installation
 
-This is a Tailscale-only deployment. It publishes no Docker host ports and
-does not add a LAN or public-IP access mode. Tailscale SSH, Tailscale Serve
+This deployment publishes no Docker host ports and does not add a LAN or
+public-IP port mapping. Tailscale SSH, Tailscale Serve
 HTTPS, authenticated noVNC, remote Playwright MCP, and optional Chrome Remote
 Desktop on Ubuntu are the supported access paths. Ubuntu does not require a
 host graphical environment: noVNC-only mode runs Xvfb/Xfce in the container.
+An optional Tailscale Funnel exposes only authenticated MCP on public HTTPS 443;
+it never exposes permanent noVNC or CDP.
 
 ## Supported topologies
 
@@ -97,6 +99,8 @@ The installer asks, in order, for:
 16. Confirmation that the resulting identity belongs to the intended tailnet.
 17. Confirmation that Tailscale Serve exposes only the authenticated HTTPS
     gateway on TCP 443.
+18. Whether authenticated MCP should be public through Funnel HTTPS 443. When
+    enabled, permanent noVNC remains tailnet-only on Serve HTTPS 8443.
 
 It then prints the ordered user-only steps for Codex sign-in, the optional
 official ChatGPT extension, remote MCP configuration, and optional Codex full
@@ -119,8 +123,8 @@ The installer:
 - removes the temporary auth-key file immediately after enrollment;
 - preserves or creates independent root-only gateway credentials in the
   persistent machine-state volume;
-- configures Tailscale Serve HTTPS 443 to the authenticated gateway without
-  publishing a Docker port;
+- configures private Tailscale Serve without publishing a Docker port and,
+  when explicitly selected, public MCP-only Funnel HTTPS 443;
 - requires the MCP backend to listen on `127.0.0.2:8932` and completes a real
   initialize, tool-list, snapshot, and session-delete canary.
 
@@ -147,8 +151,8 @@ With CRD disabled, the platform-selecting desktop wrapper immediately starts
 Xvfb and Xfce inside the container. x11vnc and noVNC attach to that display, so
 the Docker host itself needs no window system or logged-in graphical user. The
 same persistent Chrome, Codex, and Playwright MCP workflow remains available.
-Tailscale Serve is still the only permanent ingress and no Docker ports are
-published.
+Private Serve remains the desktop ingress and no Docker ports are published.
+The optional MCP-only Funnel behaves identically in either desktop mode.
 
 ## Tailscale enrollment
 
@@ -385,7 +389,7 @@ Then perform the interactive acceptance checks:
 | Login URL expired or was never opened | Leave the persistent volumes intact and rerun the installer from the same clean commit. Choose browser enrollment again to obtain a new short-lived URL. |
 | SSH disconnected while the installer waited | Reconnect with a PTY, inspect only sanitized container health and Tailscale status, then rerun the installer. Its base deployment and persistent volumes are designed to survive an incomplete enrollment. |
 | Wrong Tailscale account or tailnet was selected | Stop. The installer preserves the observed identity for investigation and refuses to claim success. Switching or logging out changes access and requires explicit operator approval; do not do it automatically. |
-| Tailscale is running but Serve 443 is absent | Check `tailscale status`, `tailscale serve status`, MagicDNS, HTTPS availability, and tailnet ACLs. Fix the prerequisite, then rerun the same installer or restart only the gateway. Do not publish a Docker port as a workaround. |
+| Tailscale ingress is absent | Check `tailscale status`, `tailscale serve status`, `tailscale funnel status`, MagicDNS, HTTPS availability, and tailnet policy. Fix the prerequisite, then rerun the same installer or restart only the gateway. Do not publish a Docker port as a workaround. |
 | CRD mode remains on the local fallback after registration | Restart the service or container once so the desktop selector detects the persistent CRD host configuration, then verify CRD and noVNC. Do not flip only the runtime flag. |
 | Playwright MCP does not listen on 8932 | Inspect `remote-browser-owner`, the protected Unix endpoint, `remote-browser-keeper`, and `playwright-mcp` in that order. Do not start a second Chrome or enable a TCP debugging port. |
 

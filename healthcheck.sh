@@ -101,6 +101,8 @@ curl --fail --silent --show-error --max-time 5 \
   "http://127.0.0.2:6081/" | grep -qi noVNC
 curl --fail --silent --show-error --max-time 5 \
   "http://127.0.0.1:8443/healthz" | grep -qx ready
+[[ "$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time 5 \
+  http://127.0.0.1:8445/login/)" == 404 ]]
 
 supervisorctl status desktop-session | \
   grep -Eq '^[^[:space:]]+[[:space:]]+RUNNING([[:space:]]|$)'
