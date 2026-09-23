@@ -253,6 +253,8 @@ Then complete real workflow acceptance:
 - Container recreation preserves Tailscale, Codex, the Chrome profile and any
   installed extensions, browser state, gateway credentials, and Ubuntu CRD
   registration when present.
+- The desktop user can run `sudo -n id -u` and receives `0`; a harmless Chrome
+  download lands in the persistent home and remains there after recreation.
 - One scheduled task runs with no viewer attached.
 - Docker still reports no published ports.
 

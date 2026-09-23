@@ -62,6 +62,13 @@ case "${CODEX_DESKTOP_IMAGE_ARCH}" in
 esac
 [[ "$(node --print process.arch)" == "${expected_node}" ]] ||
   fail 'Node architecture does not match the native image architecture'
+[[ "$(setpriv --reuid=10001 --regid=10001 --init-groups sudo -n id -u)" == 0 ]] ||
+  fail 'the desktop user cannot use sudo inside the container'
+[[ "$(stat -c '%u:%g:%a' /home/codex/Downloads)" == 10001:10001:700 ]] ||
+  fail 'the persistent Downloads directory has unsafe ownership or permissions'
+setpriv --reuid=10001 --regid=10001 --init-groups \
+  test -w /home/codex/Downloads ||
+  fail 'the desktop user cannot write to persistent Downloads'
 
 for program in desktop-session x11vnc novnc remote-browser-owner playwright-mcp \
   remote-browser-keeper \

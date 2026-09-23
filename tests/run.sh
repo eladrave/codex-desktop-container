@@ -5,6 +5,7 @@ repo_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${repo_dir}"
 
 node --test \
+  tests/persist-download.test.cjs \
   tests/guest-session-proxy.test.cjs \
   tests/mcp-session-regression.test.cjs
 PYTHONDONTWRITEBYTECODE=1 python3 tests/guest-access-broker.test.py

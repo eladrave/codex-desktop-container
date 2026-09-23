@@ -48,6 +48,11 @@ test "$(od -An -tx1 -j18 -N2 /usr/local/bin/tailscale | tr -d ' \n')" = \
 test "$(od -An -tx1 -j18 -N2 /usr/local/bin/tailscaled | tr -d ' \n')" = \
   "${CODEX_DESKTOP_TAILSCALE_ELF_MACHINE_HEX}"
 test "$(passwd -S codex | cut -d ' ' -f2)" = "L"
+test "$(setpriv --reuid=10001 --regid=10001 --init-groups \
+  sudo -n id -u)" = 0
+test "$(stat -c '%u:%g:%a' /home/codex/Downloads)" = 10001:10001:700
+setpriv --reuid=10001 --regid=10001 --init-groups \
+  test -w /home/codex/Downloads
 for mime_type in text/html x-scheme-handler/http x-scheme-handler/https; do
   test "$(setpriv --reuid=10001 --regid=10001 --init-groups \
     env HOME=/home/codex USER=codex LOGNAME=codex \

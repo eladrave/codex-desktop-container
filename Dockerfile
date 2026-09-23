@@ -116,6 +116,9 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     && locale-gen en_US.UTF-8 \
     && groupadd --gid 10001 codex \
     && useradd --uid 10001 --gid 10001 --create-home --shell /bin/bash codex \
+    && printf '%s\n' 'codex ALL=(ALL:ALL) NOPASSWD: ALL' > /etc/sudoers.d/codex-desktop \
+    && chmod 0440 /etc/sudoers.d/codex-desktop \
+    && visudo -cf /etc/sudoers \
     && groupadd --gid 10002 remote-guest \
     && useradd --uid 10002 --gid 10002 --no-create-home \
       --home-dir /nonexistent --shell /usr/sbin/nologin remote-guest
@@ -214,6 +217,7 @@ RUN chmod 0755 \
       /home/codex/.cache \
       /home/codex/.codex \
       /home/codex/.local/share \
+      /home/codex/Downloads \
       /home/codex/Projects \
       /home/codex/.vnc \
       /home/codex/.config/remote-browser \
@@ -229,9 +233,6 @@ RUN chmod 0755 \
       chmod 0755 /opt/google/chrome-remote-desktop/start-host.real; \
       install -d -o codex -g codex -m 0700 \
         /home/codex/.config/chrome-remote-desktop; \
-      printf '%s\n' 'codex ALL=(root) NOPASSWD: /usr/bin/systemctl enable --now chrome-remote-desktop@codex' \
-        > /etc/sudoers.d/codex-crd-systemctl; \
-      chmod 0440 /etc/sudoers.d/codex-crd-systemctl; \
     else \
       rm -f \
         /usr/local/share/codex-desktop/start-host-wrapper \
@@ -260,6 +261,8 @@ RUN chmod 0755 \
       /opt/codex-desktop/remote-browser/guest-session-proxy.cjs \
     && node --check \
       /opt/codex-desktop/remote-browser/browser-owner.cjs \
+    && node --check \
+      /opt/codex-desktop/remote-browser/persist-download.cjs \
     && node --check \
       /opt/codex-desktop/remote-browser/mcp-keeper.cjs \
     && test "$(node --print 'process.arch')" = \

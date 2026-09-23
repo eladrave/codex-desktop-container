@@ -44,7 +44,9 @@ bash -n \
 sh -n bootstrap.sh
 sh -n chrome-remote-desktop-session
 node --check tests/live-guest-funnel-regression.cjs
+node --check tests/download-runtime-probe.cjs
 node --check lib/remote-browser/browser-owner.cjs
+node --check lib/remote-browser/persist-download.cjs
 node --check lib/remote-browser/mcp-keeper.cjs
 
 if command -v shellcheck >/dev/null 2>&1; then

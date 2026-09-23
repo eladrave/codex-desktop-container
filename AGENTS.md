@@ -52,6 +52,13 @@ immutable image tag and validate the real Tailscale, authenticated noVNC, MCP,
 Codex, Chrome-extension, restart-persistence, scheduled-task, and
 platform-specific Ubuntu CRD workflows before reporting a deployment complete.
 
+The desktop user has passwordless sudo inside the container. Package installs
+made interactively change only that container's writable layer; packages needed
+after an image replacement belong in the Dockerfile. Chrome downloads must be
+saved from Playwright's temporary artifacts into the persistent home volume.
+Do not overwrite existing downloads, and verify a test download survives a
+container restart when changing this path.
+
 The Playwright MCP service uses the stock pinned package against the one
 persistent headed Chrome/profile. A separate owner process launches Chrome
 with Playwright's private pipe transport and publishes only a protected Unix

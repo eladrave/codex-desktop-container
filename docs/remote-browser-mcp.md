@@ -53,6 +53,10 @@ stable symlink `/run/remote-browser/browser/endpoint.sock`.
 
 The endpoint directory is owned by `codex` with mode `0700`; UID 10002 cannot
 traverse it. Playwright MCP connects with its supported `--endpoint` option.
+The owner also copies completed Chrome downloads out of Playwright's temporary
+artifact storage into the persistent home volume. It honors the browser's
+selected download directory when that directory is inside `/home/codex`, or
+uses `/home/codex/Downloads`. An existing filename is never overwritten.
 Chrome must never receive `--remote-debugging-port` or a sandbox-disabling flag,
 and no process may expose CDP over TCP on any port. Restarting or deleting MCP
 sessions must not close Chrome. The keeper maintains one nonmutating MCP client

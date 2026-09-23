@@ -65,6 +65,9 @@ state="$(docker inspect "${container_name}" \
 [[ "${state}" == 'running healthy {}' ]]
 
 docker exec "${container_name}" /usr/local/sbin/codex-desktop-healthcheck
+[[ "$(docker exec --user 10001:10001 "${container_name}" sudo -n id -u)" == 0 ]]
+[[ "$(docker exec "${container_name}" stat -c '%u:%g:%a' \
+  /home/codex/Downloads)" == '10001:10001:700' ]]
 docker exec "${container_name}" supervisorctl status
 packages=(chatgpt google-chrome-stable novnc websockify x11vnc)
 if [[ "${crd_enabled}" == 1 ]]; then

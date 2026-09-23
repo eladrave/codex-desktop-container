@@ -304,6 +304,24 @@ The Chrome profile persists under
 `/var/lib/codex-desktop/home/.config/remote-browser/chrome-profile`. This
 nondefault path is required for Playwright's private debugging-pipe ownership.
 
+### Packages and Chrome downloads
+
+The `codex` desktop user can run `sudo` without a Unix password inside the
+container, for example `sudo apt-get update` followed by `sudo apt-get install
+PACKAGE`. The container remains inside Docker's namespaces and capability
+allowlist. An interactively installed OS package lives in the current
+container's writable layer and disappears when that container is replaced.
+Add packages that must persist to the `Dockerfile`, build a new immutable image,
+and upgrade through the installer.
+
+Files in `/home/codex`, including `/home/codex/Projects` and
+`/home/codex/Downloads`, live on the persistent home volume. Chrome's profile
+may select a download directory inside that home. The browser owner saves each
+completed download there under a readable, collision-safe filename; if the
+selected directory is missing or outside the persistent home, it uses
+`/home/codex/Downloads`. Those files survive image replacement. An active
+download interrupted by a container stop may need to be retried.
+
 ## Use Playwright MCP
 
 The external server uses stock pinned Playwright MCP without a Playwright

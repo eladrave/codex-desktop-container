@@ -41,6 +41,7 @@ setpriv --reuid=10001 --regid=10001 --init-groups \
   /home/codex/.config/remote-browser \
   /home/codex/.local \
   /home/codex/.local/share \
+  /home/codex/Downloads \
   /home/codex/.vnc \
   /home/codex/Projects
 

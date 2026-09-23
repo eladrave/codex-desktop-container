@@ -73,6 +73,9 @@ grep -Fqx 'volume codex-desktop-tailscale /var/lib/tailscale' <<<"${mounts}"
 grep -Fqx 'volume codex-desktop-machine /var/lib/codex-desktop-persistent' <<<"${mounts}"
 
 docker exec "${container_name}" /usr/local/sbin/codex-desktop-healthcheck
+[[ "$(docker exec --user 10001:10001 "${container_name}" sudo -n id -u)" == 0 ]]
+[[ "$(docker exec "${container_name}" stat -c '%u:%g:%a' \
+  /home/codex/Downloads)" == '10001:10001:700' ]]
 docker exec "${container_name}" supervisorctl status
 docker exec "${container_name}" dpkg-query -W \
   chatgpt google-chrome-stable novnc websockify x11vnc xvfb

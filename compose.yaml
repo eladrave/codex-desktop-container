@@ -33,17 +33,19 @@ services:
     cap_add:
       - CHOWN
       - DAC_OVERRIDE
+      - FOWNER
       - KILL
       - SETGID
       - SETUID
+      - AUDIT_WRITE
     security_opt:
       # Ubuntu 24.04 AppArmor and Docker's default seccomp profile restrict the
       # unprivileged user namespaces required by the Codex Electron sandbox.
-      # Keep Chromium's sandbox enabled and retain Docker namespaces,
-      # no-new-privileges, the capability allowlist, and no published ports.
+      # Keep Chromium's sandbox enabled and retain Docker namespaces, the
+      # capability allowlist, and no published ports. The desktop user can run
+      # sudo inside this container, which requires setuid to remain available.
       - apparmor=unconfined
       - seccomp=unconfined
-      - no-new-privileges:true
     volumes:
       - type: bind
         source: /var/lib/codex-desktop/home

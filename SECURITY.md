@@ -37,6 +37,22 @@ MCP, noVNC, and x11vnc bind to
 Do not change these backends to `127.0.0.1`, a wildcard address, or IPv6. Do
 not publish any of these ports through Docker.
 
+The desktop user `codex` has passwordless `sudo` inside the container so a
+person at the desktop can install packages. Compose therefore does not set
+`no-new-privileges`. The MCP server exposes server-process code execution as
+`codex`, so an authenticated MCP token holder has container-root authority and
+can read root-owned gateway and Tailscale state. Keep MCP tokens private, restrict
+tailnet access, retain the capability allowlist, and never mount the Docker
+socket or host-sensitive directories. This is container root, not macOS host
+root. Interactive OS package installs change only the container writable layer
+and are lost when the image is replaced; bake required packages into the image.
+
+Playwright stores downloads as temporary artifacts and removes them when the
+browser context closes. The browser owner copies completed downloads into a
+collision-safe file in the persistent home volume, using the Chrome-selected
+folder only when it resolves inside `/home/codex`. The default is
+`/home/codex/Downloads`. Existing downloaded files are never overwritten.
+
 Temporary guest access is the only supported public desktop ingress. It uses a
 foreground Tailscale Funnel on external HTTPS 10000 and a separate guest-only
 proxy on `127.0.0.1:8444`; it never funnels the permanent gateway on 8443.

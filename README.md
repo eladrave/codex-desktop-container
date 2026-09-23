@@ -118,6 +118,14 @@ Those host paths apply to Ubuntu. The Apple silicon Compose override uses the
 named volumes `codex-desktop-home`, `codex-desktop-tailscale`, and
 `codex-desktop-machine` for the same container targets.
 
+The desktop user can run `sudo` inside the container to install packages. An
+`apt` install changes the current container's writable layer; rebuild the
+image with packages added to the `Dockerfile` if they must survive a container
+replacement. Chrome downloads are copied out of Playwright's temporary
+artifacts into the persistent home volume. The browser's selected download
+folder is honored when it is inside `/home/codex`; otherwise files go to
+`/home/codex/Downloads`.
+
 No ports are published. Tailscale and, when enabled on Ubuntu, Chrome Remote
 Desktop establish outbound connections. No Docker socket is mounted, and no
 existing Codex profile is copied into the image.
@@ -154,8 +162,9 @@ CDP listener.
 
 The Codex Electron sandbox needs unprivileged user namespaces. This deployment
 loads an executable-specific AppArmor profile and runs the outer container with
-an explicit capability allowlist, `no-new-privileges`, and no published ports.
-It does not disable Chromium's application sandbox.
+an explicit capability allowlist and no published ports. `no-new-privileges` is
+not set because the desktop user's passwordless `sudo` requires setuid. It does
+not disable Chromium's application sandbox.
 
 For compatibility, Compose disables Docker's default AppArmor and seccomp
 profiles for this container before the executable-specific Codex AppArmor
